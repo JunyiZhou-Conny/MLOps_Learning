@@ -2,7 +2,7 @@
 # Single source of truth for this repo: lectures -> tutorials -> repos -> study guides -> videos.
 # Lecture numbers and titles follow the Ed lessons (course site: tutorials_demo.md, synced with Ed
 # on 2026-10). `python tools/course_map.py` regenerates the map in README.md from this file;
-# `scripts/sync_tutorials.sh` clones/pulls every repo listed under `repos:`.
+# `tools/sync_tutorials.py` clones/pulls every repo listed under `repos:`.
 
 course:
   name: "AC215 / E115 · MLOps & LLMOps: Production AI Systems"
@@ -15,7 +15,7 @@ course:
   github_org: https://github.com/dlops-io
 
 # Every tutorial repository (GCP track). `pinned`: the commit the study guide and video were made
-# from (scripts/sync_tutorials.sh --pinned checks it out; the default is the latest main).
+# from (tools/sync_tutorials.py --pinned checks it out; the default is the latest main).
 repos:
   ac215-setup:           {url: https://github.com/dlops-io/ac215-setup,           pinned: 61a7b9d}
   simple-translate:      {url: https://github.com/dlops-io/simple-translate,      pinned: 62f821b}
@@ -52,6 +52,7 @@ lectures:
       - {name: "Simple Translate · install on a VM with uv", repo: simple-translate, section: "Installing App on VM using UV"}
     guide: guides/L01-vms-venvs.md
     video: ac215-l01-vms-venvs
+    video_status: "🎬 29 min, 2 parts"
   - n: 2
     title: Containers I
     ed: https://edstem.org/us/courses/97373/lessons/166028/
