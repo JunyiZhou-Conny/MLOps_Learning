@@ -46,8 +46,8 @@ The script never touches a repo with uncommitted changes, so your edits in a tut
    you are in the tutorial README (*README › section › step k of N*), and every code panel shows its
    `path · lines a–b`, so you can pause and find the same lines in your editor.
 3. **Do the tutorial yourself**, using the guide's step list as the checklist. When something fails,
-   look in the guide's *Gotchas* section first.
-4. **Exercises** (guide section 9) without re-watching; re-watch only the chapter you got wrong.
+   look in the guide's *Gotchas* section (6) first.
+4. **Exercises** (guide section 8) without re-watching; re-watch only the chapter you got wrong.
 5. **Notes** in `notes/LNN.md`, in your own words (template in [notes/README.md](notes/README.md)).
 6. **Shut down what you started** (VMs, buckets, clusters). Every guide lists the billable
    resources it creates.
