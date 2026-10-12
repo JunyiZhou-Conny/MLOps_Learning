@@ -10,12 +10,13 @@ in a GitHub repo of [dlops-io](https://github.com/dlops-io). This repo ties them
   `path:line`, the concepts behind it, the gotchas, and exercises with answers;
 - **a 3Blue1Brown-style explainer video per lecture**, made in my
   [Explainer_Videos](https://github.com/JunyiZhou-Conny/Explainer_Videos) repo, that walks through
-  the tutorial command by command so I can follow along with my own clone open;
+  the tutorial command by command so I can follow along with my own clone open (English narration;
+  English, Chinese and bilingual subtitles);
 - **my notes** (`notes/`).
 
 > 中文简介：这是我上 AC215 的学习仓库。每一讲对应一个（或几个）dlops-io 的 tutorial repo；这里有课程
 > 地图、一键 clone 全部 tutorial 的脚本、每讲的学习指南（逐条命令 + `path:line` + 原理 + 常见报错 +
-> 练习），以及 Explainer_Videos 里对应的讲解视频（英文版 + 中英夹杂的中文版，双语字幕）。用法：
+> 练习），以及 Explainer_Videos 里对应的讲解视频（英文旁白，配中文字幕和中英双语字幕）。用法：
 > 打开视频，旁边开着自己的 clone，一边看一边做。
 
 ## Quick start
