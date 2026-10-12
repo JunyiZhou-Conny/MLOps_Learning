@@ -52,7 +52,7 @@ lectures:
       - {name: "Simple Translate · install on a VM with uv", repo: simple-translate, section: "Installing App on VM using UV"}
     guide: guides/L01-vms-venvs.md
     video: ac215-l01-vms-venvs
-    video_status: "🎬 29 min, 2 parts"
+    video_status: "🎬 30 min, 2 parts"
   - n: 2
     title: Containers I
     ed: https://edstem.org/us/courses/97373/lessons/166028/
