@@ -13,7 +13,8 @@
     uv run tools/sync_tutorials.py --status       # one line per repo: branch, commit, dirty, behind/ahead
 
 Repos go to tutorials/<name> (gitignored), or to --dir / $AC215_TUTORIALS. A repo with
-uncommitted changes is never touched (you get a warning instead), so your own edits are safe.
+uncommitted changes, with commits made on a detached (pinned) HEAD, or whose branch can't
+fast-forward is never touched (you get a SKIPPED / NOT UPDATED line instead), so your work is safe.
 (`uv run` reads the header above and brings PyYAML along; plain `python3` works if PyYAML is installed.)
 """
 
@@ -61,6 +62,15 @@ def dirty(repo: Path) -> bool:
     return bool(git(repo, "status", "--porcelain"))
 
 
+def orphaned_head(repo: Path) -> bool:
+    """True when HEAD is detached on a commit that no branch, tag or remote ref contains:
+    checking anything else out would leave that commit (your work) behind."""
+    if git(repo, "rev-parse", "--abbrev-ref", "HEAD") != "HEAD":
+        return False
+    return not git(repo, "for-each-ref", "--contains", "HEAD", "--format=%(refname)",
+                   "refs/heads", "refs/tags", "refs/remotes", check=False)
+
+
 def default_branch(repo: Path) -> str:
     ref = git(repo, "symbolic-ref", "--short", "refs/remotes/origin/HEAD", check=False)
     return ref.split("/", 1)[1] if "/" in ref else "main"
@@ -75,6 +85,9 @@ def sync(name: str, base: Path, mode: str) -> str:
     else:
         if dirty(repo):
             return f"SKIPPED (uncommitted changes; commit or stash them first)"
+        if orphaned_head(repo):
+            return ("SKIPPED (detached HEAD has commits on no branch; save them first with "
+                    f"`git -C {repo} branch my-work`)")
         git(repo, "fetch", "--quiet", "--all", "--prune")
         msg = "fetched"
     if mode == "pinned":
@@ -83,7 +96,10 @@ def sync(name: str, base: Path, mode: str) -> str:
     branch = default_branch(repo)
     if git(repo, "rev-parse", "--abbrev-ref", "HEAD") != branch:
         git(repo, "checkout", "--quiet", branch)
-    git(repo, "merge", "--quiet", "--ff-only", f"origin/{branch}", check=False)
+    if subprocess.run(["git", "-C", str(repo), "merge", "--quiet", "--ff-only", f"origin/{branch}"],
+                      capture_output=True, text=True).returncode != 0:
+        return (f"NOT UPDATED: your {branch} has commits that origin/{branch} doesn't, so it can't "
+                f"fast-forward (`git -C {repo} status` shows both; rebase or merge them yourself)")
     head = git(repo, "rev-parse", "--short", "HEAD")
     note = "" if head.startswith(info["pinned"][:7]) else f"  (guide/video made at {info['pinned']})"
     return f"{msg}, {branch} @ {head}{note}"
