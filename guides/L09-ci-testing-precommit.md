@@ -9,7 +9,7 @@
 - **Idea 2 · skipped ≠ passed：** system tests 用 `skipif(not is_api_running())`，而且只在 import（collection）时探测一次 `/health`。server 没起来就是 `1 passed, 4 skipped`，整个 run 还是绿的，一定要看 `-ra` 的 summary。CI 先用 `curl -f` 卡住，server 不在就直接 fail。babykev 的做法是 marker：非 hermetic 的 test 默认 deselect（`-m 'not system'`），要跑就 `just test -m system`，必须 pass，不能 skip。
 - **Idea 3 · formatter vs linter：** black 负责改写 layout，flake8 只负责报告问题。black 删不掉 unused import（F401），也拆不开长字符串（E501），这些要人来改。两个 tool 的 line length 必须一致：hook 和 CI 都是 120，但 black 默认 88、flake8 默认 79，README 里好几条命令没传宽度，所以结果对不上。
 - **Idea 4 · git hook 是 commit 前的闸门：** `pre-commit install` 写出 `.git/hooks/pre-commit`。`.git/hooks/` 不会被 commit，也不会跟着 clone 下来，所以每个 clone 都要重新 install（babykev 的 `just setup` 顺手装好）；`git commit --no-verify` 也能跳过它，所以 CI（L21）要在 server 上再跑一遍。hook 改了文件（black、end-of-file-fixer）就算 Failed：`git diff` → `git add -u` → 再 commit。pre-commit 用的是它自己 pin 的 `rev`（black 24.1.1），不是你装的 black。hook 和 `ci.yml` 都只认 repo root：别把 `cheese-app-ci-cd` 放进 `MLOps_Learning` 这种 monorepo 里，否则 black/flake8 根本不会跑（G12）。
-- **Idea 5 · coverage 不等于 correctness：** babykev 的 step-05 是 92 tests、94% coverage、全绿，`branch_mask` 却是错的（question 2 能 attend 到 question 1）。step-05a 用 hypothesis 写 property-based test 才抓到，还把 counter-example shrink 到 `shape = (1, [1, 1, 1])`。
+- **Idea 5 · coverage 不等于 correctness：** babykev 的 step-05 是 92 tests、94% coverage、全绿，`branch_mask` 却是错的（question 2 能 attend 到 question 1）。step-05a 加了 mask test 和 hypothesis 的 property-based test：把 step-05 的 mask 放回去就是 `8 failed, 95 passed`；故意注入一个错的 "fix"，六个 token 的手画例子看不出来，hypothesis 却能找到反例，并把它 shrink 到 `shape = (1, [1, 1, 1])`。
 - **Idea 6 · 一个 environment，一条命令：** cheese 靠 Docker image 保证环境一致（code 是 `COPY` 进去的，测的就是要 ship 的那个 artifact）；babykev 靠 `uv.lock`（`UV_LOCKED=1`）加 `just check`，人、hook、agent 和以后的 CI 都跑同一个动词。dev 依赖放在 `[dependency-groups]`，不跟 runtime 混在一起。
 - **最费时间的坑：** ① code 和 tests 是 `COPY` 进 image 的，没有 volume mount：改了 `utils.py` 或 test 不 rebuild（`docker build -t cheese-app-api:local .`）就什么都不变（G1）。② fresh clone 上 `black --check --line-length 120 api/` 直接 fail：`utils.py` 是故意留脏的（G23），不是你 Part 7 的 `/add/` 代码有问题。
 - **README 的几个 errata：** README:442 的 auto-format 命令把 `src/api-service` mount 到 `/app`，盖掉了 `docker-entrypoint.sh`，必报 `No such file or directory`（E1、G2）；`/euclidean_distance/` 返回的是 JSON object，不是 `5.0`；"What Gets Checked?" 只列了 5 个 hook，config 里其实有 9 个；Part 6 的 `def broken(): assert False` 不会让任何 test 变红（只有 `test_*` 会被 collect）；Option 3 说"另开一个 terminal 起 server"，会和 `docker-shell.sh` 抢 9000 端口。
@@ -273,7 +273,7 @@ Commands in backticks are exactly as the README (or, for the guest lecture, `wal
 - [ ] `git rm --cached -q .env && rm .env` — (311) undo.
 
 *steps 04/04b: docs as a check (skim)*
-- [ ] `just docs check` — counts the gaps; from step-04b it is part of `just check`, so a missing docstring or comment blocks a commit.
+- [ ] `just docs check` — (348) counts the gaps; from step-04b it is part of `just check`, so a missing docstring or comment blocks a commit.
 
 *step-05: green but wrong*
 - [ ] `uv run python -c "from babykev.model import branch_mask; m = branch_mask([0, 0, 1, 1, 2, 2], 'cpu')[0, 0] == 0; print('\n'.join(''.join('#' if x else '.' for x in r) for r in m))"` — (589) rows 5-6 print `#####.` / `######`; they should be `##..#.` / `##..##`.
@@ -319,8 +319,8 @@ The guest lecture's `babykev` shows the same gate on a real ML project, with no 
 
 ```
  YOUR LAPTOP  (e.g. /Users/conny/Desktop/AC215/cheese-app-ci-cd, a git clone)
- ┌────────────────────────────────────────────────────────────────────────────────────┐
- │  working tree ──git commit──► .git/hooks/pre-commit   (written by `pre-commit install`)│
+ ┌───────────────────────────────────────────────────────────────────────────────────────┐
+ │  working tree ──git commit──► .git/hooks/pre-commit (written by `pre-commit install`) │
  │       │                              │ reads .pre-commit-config.yaml                  │
  │       │                              ▼                                                │
  │       │            ~/.cache/pre-commit/  isolated envs, downloaded on first run:      │
@@ -333,24 +333,24 @@ The guest lecture's `babykev` shows the same gate on a real ML project, with no 
  │       │  docker build -t cheese-app-api:local .      (build context = repo root)      │
  │       ▼                                                                               │
  │  Docker Engine (Linux) / Docker Desktop VM (Mac, Windows)                             │
- │  ┌─ image cheese-app-api:local  (FROM python:3.11-slim-bookworm, USER app uid 1000) ─┐ │
+ │  ┌─ image cheese-app-api:local (FROM python:3.11-slim-bookworm, USER app uid 1000) ─┐ │
  │  │  /app/api/  /app/tests/  /app/pytest.ini  /app/docker-entrypoint.sh  (COPY'd,    │ │
  │  │  i.e. BAKED IN, no volume)   /home/app/.local/bin: uvicorn pytest black flake8   │ │
  │  └──────────────────────────────────────────────────────────────────────────────────┘ │
- │   (a) docker run --rm cheese-app-api:local pytest tests/unit/ | tests/integration/      │
- │        ┌ container ───────────────────────────────┐                                  │
- │        │ pytest ─► power()           (unit)        │   no network, no server         │
+ │   (a) docker run --rm cheese-app-api:local pytest tests/unit/ | tests/integration/    │
+ │        ┌ container ────────────────────────────────┐                                  │
+ │        │ pytest ─► power()           (unit)        │   no network, no server          │
  │        │ pytest ─► TestClient ─► app (in-process)  │                                  │
  │        └───────────────────────────────────────────┘                                  │
- │   (b) docker run -d --name api-server -p 9000:9000 -e DEV=1 cheese-app-api:local       │
- │        ┌ container "api-server" ───────┐   host:9000 ◄── browser http://localhost:9000│
- │        │ uvicorn api.service:app :9000 │◄──────────────────────────────┐              │
- │        └───────────────────────────────┘                                │              │
- │   (c) docker run --rm --network host cheese-app-api:local pytest tests/system/ -v      │
- │        ┌ container (shares host network) ┐  HTTP GET localhost:9000 ────┘              │
+ │   (b) docker run -d --name api-server -p 9000:9000 -e DEV=1 cheese-app-api:local      │
+ │        ┌ container "api-server" ───────┐  host:9000 ◄── browser http://localhost:9000 │
+ │        │ uvicorn api.service:app :9000 │◄───────────────────────────────┐             │
+ │        └───────────────────────────────┘                                │             │
+ │   (c) docker run --rm --network host cheese-app-api:local pytest tests/system/ -v     │
+ │        ┌ container (shares host network) ┐  HTTP GET localhost:9000 ────┘             │
  │        │ pytest + requests               │  (skips 4 tests if unreachable)            │
  │        └─────────────────────────────────┘                                            │
- └────────────────────────────────────────────────────────────────────────────────────┘
+ └───────────────────────────────────────────────────────────────────────────────────────┘
         │ git push (lecture 21)
         ▼
  GitHub Actions .github/workflows/ci.yml:  build ─► {lint-and-format, unit-tests,
@@ -359,11 +359,11 @@ The guest lecture's `babykev` shows the same gate on a real ML project, with no 
  GUEST LECTURE (no Docker until step-05b)
  babykev-walk/  ── just present ── uvx timewalk ──► browser page: steps 00..05b, notes, terminals
    ├─ repo/      clone of babykev (`just setup` makes it)  ──┐
-   └─ worktree/  timewalk's replay copy at a step         ──┤
-                                                           ▼
+   └─ worktree/  timewalk's replay copy at a step          ──┤
+                                                             ▼
  babykev/  uv sync --locked ─► .venv (Python 3.13)     git commit ─► .git/hooks/pre-commit
            just fmt | lint | types | test | docs | lint-config      ├ check-added-large-files
-                       └──────────── just check ◄──────────────────┤ check-merge-conflict
+                       └──────────── just check ◄───────────────────┤ check-merge-conflict
                                                                     ├ no-env-file (language: fail)
                                                                     └ just check (always_run)
 ```

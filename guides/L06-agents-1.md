@@ -9,9 +9,9 @@
 - **Idea 2 · function calling：** model 只"写" call（`{name, args}`），你的 code 才"执行"它，结果包成 `function_response` 送回去，model 再写答案。Gemini 从来没碰过你 `localhost` 上的 ChromaDB。`mode="any"` 是**强制** function call，不是"可以 call"。
 - **Idea 3 · agent loop：** ADK 的核心就是一个 `while True:`，直到 `is_final_response()`（没有 function call/response、不是 partial）才停；OpenAI Agents SDK 用 `max_turns`（notebook 设成 12），Microsoft Agent Framework 用 `max_iterations`。`llm-rag --agent` 不是 loop，是固定的两次 call。
 - **Idea 4 · state 和 MCP：** ADK 里 `output_key="x"` 把 agent 的 final text 写进 `session.state["x"]`，下一个 agent 的 instruction 里的 `{x}` 会被替换成这个值；sub-agents 之间不直接传 message。MCP 把 tool 做成可插拔的 server（stdio child process 或 HTTP），`tool_filter` 限制 model 能要哪些 tool。
-- **Idea 5 · harness：** model 选 action，Python 决定这个 action 算不算数。Travel Planner 的价格全部由 Python 算（$2690 可以手算验证），`finalize_itinerary` 只产生 pending proposal，要下一轮 human 输入 "yes" 才 approve；Newsletter 的成功 = 有 `receipt` 而且 HTML file 真的在 disk 上，不是 model 说 "done"。只写在 prompt 里、没有 code 检查的规则（"no URLs"）会被违反。
-- **最费时间的坑：** ① ADK repo 没有 lockfile（`uv.lock` 被 gitignore），今天 `uv sync` 装的是 google-adk 2.11.0，一选 `1-baseline` 就报 `Invalid agent name`；先 `uv add "google-adk>=1.8.0,<1.28"`（→ 1.27.5）再 `uv sync`。② 每个 `agent.py` 的 fallback `gemini-2.0-flash` 已经在 2026-06-01 shut down：root `.env` 里写 `GEMINI_MODEL=gemini-3.1-flash-lite`，也别随手 copy module 的 `.env.example`，ADK 用 `override=True` 加载离 agent 最近的 `.env`。③ port 8000 冲突：`adk web` 和 llm-rag 的 ChromaDB 都要 8000，`exit` container 之后 `llm-rag-chromadb` 还在跑，要 `docker compose down`，或者 `uv run adk web --port 8080`。
-- **别拿 `out.txt` 对答案：** `out.txt` 和 README 流程图里的答案（Soča Valley、transhumance）是用 2026-09-22 改写 Tolminc 书之前的旧 index 跑的，今天你会得到 Mara 和她爷爷的故事。agent 查的是 L05 的 `char-split-collection`，没有的话先跑 `python cli.py --chunk --embed --load --chunk_type char-split`。
+- **Idea 5 · harness：** model 选 action，Python 决定这个 action 算不算数。Travel Planner 的价格全部由 Python 算（$2690 可以手算验证），`finalize_itinerary` 只产生 pending proposal，要下一轮 human 输入 "yes" 才 approve；Newsletter 的成功 = 有 `receipt` 而且 HTML file 真的在 disk 上，不是 model 说 "done"。只写在 prompt 里、没有 code 检查的规则（"no URLs"）靠不住：saved run 的 HTML 里照样出现了 `Promotion URL: https://…`。
+- **最费时间的坑：** ① ADK repo 没有 lockfile（`uv.lock` 被 gitignore），今天 `uv sync` 装的是 google-adk 2.11.0，一选 `1-baseline` 就报 `Invalid agent name`；先 `uv add "google-adk>=1.8.0,<1.28"`（→ 1.27.5）再 `uv sync`。② 除了 `6-rag/1-vertex-rag-engine`（写死 `gemini-2.5-flash`），每个 `agent.py` 的 fallback `gemini-2.0-flash` 都已经在 2026-06-01 shut down：root `.env` 里写 `GEMINI_MODEL=gemini-3.1-flash-lite`，也别随手 copy module 的 `.env.example`，ADK 用 `override=True` 加载离 agent 最近的 `.env`。③ port 8000 冲突：`adk web` 和 llm-rag 的 ChromaDB 都要 8000，`exit` container 之后 `llm-rag-chromadb` 还在跑，要 `docker compose down`，或者 `uv run adk web --port 8080`。
+- **别拿 `out.txt` 对答案：** `out.txt` 里的答案（Soča Valley、transhumance）是用 2026-09-22 改写 Tolminc 书之前的旧 index 跑的，README 流程图里的答案（"Slovenian Alps"）也来自旧书，今天你会得到 Mara 和她爷爷的故事。agent 查的是 L05 的 `char-split-collection`，没有的话先跑 `python cli.py --chunk --embed --load --chunk_type char-split`。
 - **做完要删：** llm-rag `exit` 之后在 `llm-rag/` 里 `docker compose down`；`adk web` / `uvicorn` 用 Ctrl+C；6-rag 的 ChromaDB `docker compose down`（加 `-v` 连 volume 一起删）；做了 `6-rag/1-vertex-rag-engine` 的话，用 `setup_corpus.py` 的 option 5 删掉 RAG Engine corpus；三个 Colab 都 *Runtime → Disconnect and delete runtime*；不用的 service-account key 删掉，`secrets/` 和 `**/.env` 永远不要 commit。
 
 ## At a glance
@@ -76,10 +76,10 @@ Commands in backticks are exactly as the README or notebook writes them (placeho
 - [ ] `!gdown 1dxvxGZZ-yYEEHQuaoP4HwaYxsbOC4XEh` — cell 13 (`# @title Download`): saved output `To: /content/quiz-schema.json … 2.10k`.
 - [ ] `!gdown 1OykEQrwa5cnZgPIVrOdnDeq3txots3H0` — cell 13: saved output `To: /content/quiz-ui.html … 10.8k`. Cell 62 needs both files.
 - [ ] Cells 17-21 (`# Define the LLM model and question`, `# @title Define BaseLLM`, `# Initialize`) — one `chat.completions.create` call; saved output `Tokens: 293, Time: 2.81s`.
-- [ ] Cells 24-26 (`# @title Define ReasoningLLM`, `# Initialize`) — 11 calls per question; eleven `🧠 BaseLLM: Making single API call...` lines and `Sub-questions explored: 4`. "Total tokens" is approximate.
+- [ ] Cells 24-26 (`# @title Define ReasoningLLM`, `# Initialize`, `steps = reasoning_result["reasoning_steps"]`) — 11 calls per question; eleven `🧠 BaseLLM: Making single API call...` lines and `Sub-questions explored: 4`. "Total tokens" is approximate.
 - [ ] Cells 30-31 (`# @title Define SimpleAgent`, `# Initialize`) — an Agents-SDK `Agent` with `WebSearchTool`; saved output `Time: 13.29s` plus a "Sources" list. "Tools used: 1" counts configured tools, not calls.
-- [ ] Cells 37-44 (`# @title Step 1: Basic prompt` … `# @title Step 7: Structured Output`) — seven context layers. Step 2 (cell 39, lines 18-21) swaps the `user` and `system` roles (E1).
-- [ ] Cells 46-50 (`# --- Fun Facts data ---`, `# System Prompt`, `# If you want to list all the tools called in the agent run`) — `@function_tool(name_override="pavlos_fun_fact_tool")`; saved output `1. pavlos_fun_fact_tool  args={}` three times.
+- [ ] Cells 37-44 (`model = "gpt-4o"`, `# @title Step 1: Basic prompt` … `# @title Step 7: Structured Output`) — seven context layers. Step 2 (cell 39, lines 18-21) swaps the `user` and `system` roles (E1).
+- [ ] Cells 46-50 (`# Define the LLM model and question`, `# --- Fun Facts data ---`, `# System Prompt`, `# If you want to list all the tools called in the agent run`) — `@function_tool(name_override="pavlos_fun_fact_tool")`; saved output `1. pavlos_fun_fact_tool  args={}` three times.
 - [ ] Cell 54 (`# MCP Server`) — `MCPServerStreamableHttp` to `https://pavlos-fun-facts.dlops.io/mcp`, passed as `mcp_servers=`.
 - [ ] Cells 57-59 *(optional)* — your own FastMCP server in a daemon thread at `http://127.0.0.1:8001/mcp`; expect `"POST /mcp HTTP/1.1" 200 OK` and `Pavlos Fun Fact Tool Called`. Do not rerun cell 57 in the same runtime.
 - [ ] Cells 62-71 (`# @title Some Utils`, the specialists, `# Agents-as-tools for orchestration`, `orchestrator = Agent(`, `async def run_guild`) — Pydantic contracts, `.as_tool(...)`, `Runner.run(orchestrator, prompt, max_turns=12)`.
@@ -134,7 +134,7 @@ Commands in backticks are exactly as the README or notebook writes them (placeho
 - [ ] `uv sync` — already done at the root; run inside the module folder it builds an extra venv (G13).
 - [ ] `cp .env.example .env` — skip it if the root `.env` is set: a copied module `.env` becomes the nearest one and silently wins over the root one (G2). If you do copy it, put your key and `GEMINI_MODEL=gemini-3.1-flash-lite` in it.
 - [ ] `uv run adk web` — then select `1-baseline`.
-- [ ] Type a trip request, e.g. "2 adults, Boston → Montréal, Oct 30-Nov 2, $1500, train preferred" — three agent responses in order; the event/state inspector shows `itinerary_validation`, `travel_plan`, `trip_summary`.
+- [ ] *(extra)* Type a trip request (the README gives no example), e.g. "2 adults, Boston → Montréal, Oct 30-Nov 2, $1500, train preferred" — three agent responses in order; the event/state inspector shows `itinerary_validation`, `travel_plan`, `trip_summary`.
 
 ### 2-litellm · Multi-Model Support
 
@@ -165,9 +165,9 @@ Commands in backticks are exactly as the README or notebook writes them (placeho
 - [ ] `uv sync` — builds a second venv with `google-adk[all]`; you can skip it and use the root venv instead.
 - [ ] `uv run uvicorn app.main:app --reload --port 8080` — as written (module venv).
 - [ ] `uv run --project .. uvicorn app.main:app --reload --port 8080` — *(extra, reasoned, not run)* the same server from the root venv.
+- [ ] Open http://localhost:8080/docs — FastAPI's Swagger UI; `GET /health` returns `{"status":"healthy"}`.
 - [ ] `curl -X POST http://localhost:8080/chat -H "Content-Type: application/json" -d '{"user_message": "Hello!"}'` — returns `{"response":"..."}`; every request gets a new random session.
 - [ ] `curl -X POST http://localhost:8080/chat/stream -H "Content-Type: application/json" -d '{"user_message": "Tell me a story"}'` — NDJSON `{"chunk": …}` lines; final-response events only, not token streaming.
-- [ ] Open http://localhost:8080/docs — FastAPI's Swagger UI; `GET /health` returns `{"status":"healthy"}`.
 - [ ] Ctrl+C — *(extra)* stops uvicorn.
 - [ ] `docker build -t adk-agent .` — builds the module's image.
 - [ ] `docker run -p 8080:8080 -e GOOGLE_API_KEY=your_google_api_key adk-agent` — as written; add `-e GEMINI_MODEL=gemini-3.1-flash-lite`, or the image falls back to the retired default (`app/agent.py:12`).
@@ -181,6 +181,7 @@ Commands in backticks are exactly as the README or notebook writes them (placeho
 - [ ] `cd 5-custom-agent`
 - [ ] `uv run python simple_custom_agent.py` — prints `Agent: 🤖 [Bot]: …`.
 - [ ] `uv run --project .. python simple_custom_agent.py` — *(extra)* the same from the root venv (G13).
+- [ ] `cd 5-custom-agent` — Option 3 repeats it; skip it if you are already in the folder.
 - [ ] `uv run python conditional_agent.py` — prints `→ Routed to: SimpleHandler` / `ComplexHandler` / `ClarificationHandler`, then `Response:` for each of three test queries.
 - [ ] `uv run --project .. python conditional_agent.py` — *(extra)* the same from the root venv.
 
@@ -394,7 +395,7 @@ GOOGLE COLAB VM (browser)     notebook --HTTPS--> OpenAI API (gpt-4o, gpt-5.6-lu
 
 ### 3.7 Multi-agent patterns: workflow agents, agents-as-tools, custom routers
 - **Explanation:** There are three ways to compose agents in this lecture.
-  - (a) **Workflow agents:** `SequentialAgent`, `ParallelAgent` and `LoopAgent`. Deterministic orchestration, LLM inside each step. Only `SequentialAgent` is in runnable code (`1-baseline/agent.py:35-39`); `ParallelAgent` appears only as a README snippet (`1-baseline/README.md:139-150`) and `LoopAgent` only in `5-custom-agent/README.md:232-260`.
+  - (a) **Workflow agents:** `SequentialAgent`, `ParallelAgent` and `LoopAgent`. Deterministic orchestration, LLM inside each step. Only `SequentialAgent` is in runnable code (`1-baseline/agent.py:35-39`); `ParallelAgent` appears only as a README snippet (`1-baseline/README.md:139-147`) and `LoopAgent` only in `5-custom-agent/README.md:232-260`.
   - (b) **Agents-as-tools:** each specialist is wrapped with `.as_tool(name, description)`, and an orchestrator LLM decides which one to call (Cheese Quiz cells 64-71: Stilton, Cashew, Brie, Cheddar, Mozzarella, Ricotta). The Newsletter wraps the researcher and editor as `@tool` functions (cells 21-22).
   - (c) **Custom agents:** subclass `BaseAgent` and write `_run_async_impl` with ordinary `if` statements (`5-custom-agent/conditional_agent.py:72-104`).
 - **Mental model:** (a) is an assembly line, (b) is a manager with a phone book of specialists, (c) is code that you write yourself.
@@ -958,7 +959,7 @@ ricotta_tool = ricotta_agent.as_tool("format_quiz_json", "Format quiz into JSON.
 | G4 | Port 8000 is still busy after you `exit`ed the llm-rag shell | `docker compose run --rm llm-rag-cli` (`docker-shell.sh:12`) starts the `chromadb` dependency (`docker-compose.yml:16-17`), but `--rm` removes only the one-off CLI container. | `docker compose down` (or `docker stop llm-rag-chromadb`). |
 | G5 | `KeyError: 'GCP_PROJECT'`, `403 PERMISSION_DENIED`, `DefaultCredentialsError` | `cli.py:23` requires `GCP_PROJECT`, which only `docker-shell.sh:7` sets. The key must exist at `../secrets/llm-service-account.json`, and the SA needs the Vertex AI User role. | Always start via `sh docker-shell.sh`; edit line 7; check `ls ../secrets`; grant the role; enable the Vertex AI API. |
 | G6 | `--agent` fails at `get_collection` with "Collection [char-split-collection] does not exist"-style NotFound | The agent uses the L05 collection (`cli.py:427-429`). ChromaDB data lives in `llm-rag/docker-volumes/chromadb`, which is git-ignored (`llm-rag/.gitignore:3`), so a fresh clone has none. | `python cli.py --chunk --embed --load --chunk_type char-split`. Or run with the chunk type you did load (`--chunk_type recursive-split`). |
-| G7 | Your answer is about "Mara" and her grandfather, not the Soča Valley as in `out.txt` and the README diagram | `Tolminc Cheese.txt` was rewritten on 2026-09-22 (`85bba32`). `out.txt` was recorded against an index built from the old file. | Expected. Re-load if you want your index to match the current repo. Remember that changing source docs requires re-running chunk → embed → load. |
+| G7 | Your answer is about "Mara" and her grandfather, not the Soča Valley as in `out.txt` or the Slovenian Alps as in the README diagram | `Tolminc Cheese.txt` was rewritten on 2026-09-22 (`85bba32`). `out.txt` was recorded against an index built from the old file. | Expected. Re-load if you want your index to match the current repo. Remember that changing source docs requires re-running chunk → embed → load. |
 | G8 | Inside the container `/app` is empty, or `/secrets` is empty | Bind mounts are relative and name-dependent: `../llm-rag:/app` and `../secrets:/secrets` (`docker-compose.yml:11-12`). Cloning into a folder not named `llm-rag`, or putting `secrets/` inside the repo, breaks them. | Layout must be `AC215/llm-rag/` and `AC215/secrets/` side by side (README.md:64-69). |
 | G9 | `QUICKSTART.md` commands fail: click rejects the argument with an `Invalid value for '[AGENTS_DIR]'` / "is a file" error *(reasoned, not run)*; `No such file` for `sequential_example.py`, `story_flow_agent.py` …; `3-mcp-connections` not found | `adk web` takes a directory (`file_okay=False`). The scripts named at `QUICKSTART.md:70-72, 79, 85, 91-92` never existed in this repo's git history (only `conditional_agent.py`, line 93, exists). The module has been called `3-mcp-tools` since the initial commit `f24b771`; no `3-mcp-connections` folder ever existed in this repo's history, so QUICKSTART was stale from the start. | Use `uv run adk web` from the repo root and pick the folder in the UI. Use the README module instructions, not QUICKSTART. |
 | G10 | `uv run adk` prints a usage/help screen and nothing starts | `2-litellm/README.md:74`, `3-mcp-tools/README.md:85` and `5-custom-agent/README.md:120` omit the `web` subcommand. | `uv run adk web`. |

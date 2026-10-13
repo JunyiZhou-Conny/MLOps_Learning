@@ -10,7 +10,7 @@
 - **Idea 3 · 本地 container 只是 cockpit：** `docker-shell.sh` build 出来的 `model-training-cli` 只有 `gcloud`/`gsutil` 和 service-account key，负责 package 和 submit，自己从来不 train。job 按 worker pool（machine type、accelerator、image、package、args）在 Vertex 上开 VM，stdout 进 Cloud Logging，script 一结束 VM 就删，按分钟计费。默认 `cli.sh` 跑 CPU（GPU block 被注释掉了），没有 GPU quota 也能做完。
 - **Idea 4 · 三个身份、三个开关：** 你用 `model-trainer.json` 提交 job；job 本身以 Vertex AI service agent 的身份跑，不需要 key；W&B API key 是第三把钥匙，通过 `--wandb_key` 明文传进去，会留在 job spec 里。要真的用上 GPU，accelerator type/count、`tf-gpu` image 和那个 region 的 quota 三者必须一致。
 - **Idea 5 · `MirroredStrategy`：** 一台机器上每张 GPU 一个 replica，global batch = 32 × 2 = 64 平分给两张卡，gradient 用 all-reduce 平均，model 和 optimizer 必须在 `strategy.scope()` 里建。learning rate 没有跟着 batch scale，两张卡也不等于快一倍。
-- **最费时间的坑：** ① 2026 年 `sh docker-shell.sh` 会卡在 `Dockerfile:36-37`：apt 里已经没有 `google-cloud-sdk`，把 `Dockerfile:37` 改成 `apt-get install -y google-cloud-cli jq docker-ce`，并且保留 `--platform=linux/amd64`。② `export WANDB_KEY=...` 必须在 **host** terminal、在 `sh docker-shell.sh` 之前做；漏了的话 job 要等下载完 305 MB 的 dataset 才在 `wandb.login` 报 `api_key not configured (no-tty)`，钱已经花了。进 container 先 `echo ${#WANDB_KEY}`，应该是 `40`。③ bucket 名字全局唯一：`docker-shell.sh:8-9` 的 `gs://cheese-app-trainer` 和 `ac215-project`、notebook 里的 `cheese-app-models` 都是老师的，全部改成自己的。
+- **最费时间的坑：** ① 2026 年 `sh docker-shell.sh` 会卡在 `model-training/Dockerfile:36-37`：apt 里已经没有 `google-cloud-sdk`，把 `model-training/Dockerfile:37` 改成 `apt-get install -y google-cloud-cli jq docker-ce`，并且保留 `--platform=linux/amd64`。② `export WANDB_KEY=...` 必须在 **host** terminal、在 `sh docker-shell.sh` 之前做；漏了的话 job 要等下载完 305 MB 的 dataset 才在 `wandb.login` 报 `api_key not configured (no-tty)`，钱已经花了。进 container 先 `echo ${#WANDB_KEY}`，classic key 应该是 `40`。③ bucket 名字全局唯一：`model-training/docker-shell.sh:8-9` 的 bucket `gs://cheese-app-trainer` 和 project `ac215-project`、notebook 里的 bucket `cheese-app-models` 都是老师的，全部改成自己的。
 - **别被吓到，也别被骗：** repo trainer 的 loss ≈ 100 不是 diverge，是 L1 regularization（0.02）的 penalty，看 accuracy；job 显示 succeeded 之后 trained model 根本没保存，VM 一删就没了（L15 才加 `tf.saved_model.save`，Exercise 4 自己补）。
 - **做完要删：** 在 container 里 `gsutil rm $GCS_BUCKET_URI/cheese-app-trainer.tar.gz`（或者删整个 bucket），然后 `exit`（`--rm` 会删掉 container）；console 里确认没有 `RUNNING`/`PENDING` 的 job（卡住的用 `gcloud ai custom-jobs cancel JOB_ID --region=us-central1`）；Notebook B 最后自己跑 `wandb.finish()`，两个 Colab 都 *Runtime → Disconnect and delete runtime*；学期结束删掉 `model-trainer` 的 key，rotate W&B key。
 
@@ -105,7 +105,6 @@ Commands in backticks are exactly as the README or notebook writes them (placeho
 
 *Setup (§4 A8)*
 - [ ] Open [Notebook B](https://colab.research.google.com/drive/1aAE5vR9r6Syh4heZboDbQNZS048VToxS?usp=sharing) → *File → Save a copy in Drive*; GPU runtime (cell 3).
-- [ ] In Colab's key icon (Secrets), add a secret named exactly `WandB` holding your W&B API key and enable notebook access.
 - [ ] `!pip install -q wandb -U` — cell 5: installs the latest wandb.
 - [ ] Cell 7 (`import os`) — imports, including `from wandb.integration.keras import WandbCallback`.
 - [ ] Cell 9 (`# Enable/Disable Eager Execution`) — TF 2.19.0, Keras 3.10.0, `Number of replicas: 1`.
@@ -113,14 +112,15 @@ Commands in backticks are exactly as the README or notebook writes them (placeho
 - [ ] Cell 13 (`def download_file(...)`) — utils, including `upload_experiment`. Edit the hard-coded `bucket_name = "cheese-app-models"` and `storage.Client(project="ac215-project")` here, not in a config cell.
 
 *Dataset and pipelines*
-- [ ] Cell 16 (`start_time = time.time()`) — downloads the cheese zip **and** a 510 MB legacy `experiments.zip`; delete the second `download_file(...)` line (§6, item 19).
+- [ ] Cell 16 (`start_time = time.time()`) — downloads the cheese zip **and** a 510 MB legacy `experiments.zip`. *(extra)* You can delete the second `download_file(...)` line first (§6, item 19).
 - [ ] Cells 18, 20 and 22 — load the data (`Full size of the dataset: 1156`), sample images, dataset metrics.
 - [ ] Cells 25, 27 and 29 — x/y, split, `tf.data` pipelines (built inline in cell 29): 936 / 104 / 116.
 - [ ] Cell 32 (`# Create an experiment`) — `create_experiment()`; leave `LOAD_PREV_TRAINED = False` (§9, E16).
 
 *W&B and the models*
+- [ ] Sign up at [WandB](https://wandb.ai/) (cell 33). Then, in Colab's key icon (Secrets), add a secret named exactly `WandB` holding your W&B API key and enable notebook access: cell 34 reads it with `userdata.get('WandB')`.
 - [ ] Cell 34 (`# Login into wandb`) — `wandb.login(key=wandb_key)` with `userdata.get('WandB')`: `wandb: Currently logged in as: <you>`.
-- [ ] Cells 36, 38 — 2-block CNN, 25 epochs; the only cell that passes `callbacks=[WandbCallback(save_graph=False, save_model=False)]` (it prints `WandbCallback is deprecated…`, which is harmless).
+- [ ] Cells 36, 38 — 2-block CNN, 25 epochs; cell 38 is the only training cell that passes `callbacks=[WandbCallback(save_graph=False, save_model=False)]` (it prints `WandbCallback is deprecated…`, which is harmless).
 - [ ] Cells 40/42 (4-block), 44/46 (VGG-style), 48/50 (MobileNet frozen), 52 (MobileNet fine-tuned, `epochs = 10`).
 - [ ] `wandb.finish()` — *(extra)* after cell 52: no cell closes the last run.
 - [ ] Cells 55, 57, 59 and 60 — compare, best model, load and predict.
@@ -193,13 +193,13 @@ Commands in backticks are exactly as the README or notebook writes them (placeho
 ### Create Jobs in Vertex AI
 
 *(`README.md:132-150`; §4 B11)*
-- [ ] Open and review `cli.sh`; make "any required changes": `GCP_REGION` (`cli.sh:14`) if your quota or bucket is elsewhere, `ACCELERATOR_TYPE` (`cli.sh:12`) if you switch to the GPU block.
+- [ ] Open and review `cli.sh`; make "any required changes": `GCP_REGION` (`model-training/cli.sh:14`) if your quota or bucket is elsewhere, `ACCELERATOR_TYPE` (`model-training/cli.sh:12`) if you switch to the GPU block.
 - [ ] `sh cli.sh` — submits the **CPU** job as shipped: `CustomJob [projects/<num>/locations/us-central1/customJobs/<id>] is submitted successfully.`
 
 ### OPTIONAL:Create Jobs in Vertex AI using CPU
 
 *(`README.md:152-154`; §4 B13)*
-- [ ] Edit your `cli.sh` to not pass the `accelerator-type` and `accelerator-count` — already the case: the shipped `cli.sh` runs the CPU block. For the **GPU** run instead, uncomment `cli.sh:22-27` **and** comment out `cli.sh:31-37`.
+- [ ] Edit your `cli.sh` to not pass the `accelerator-type` and `accelerator-count` — already the case: the shipped `cli.sh` runs the CPU block. For the **GPU** run instead, uncomment `model-training/cli.sh:22-27` **and** comment out `model-training/cli.sh:31-37`.
 - [ ] `sh cli.sh` — on the GPU path the logs show `GPU Available:  [PhysicalDevice(name='/physical_device:GPU:0', device_type='GPU')]`.
 
 ### View Jobs in Vertex AI
@@ -218,20 +218,20 @@ Commands in backticks are exactly as the README or notebook writes them (placeho
 ### OPTIONAL: Multi GPU Training
 
 *(`README.md:165-170`; §4 B15)*
-- [ ] Open and review `cli-multi-gpu.sh` and `package/trainer/task_multi_gpu.py`; make any required changes (e.g. `GCP_REGION`, `cli-multi-gpu.sh:13`).
+- [ ] Open and review `cli-multi-gpu.sh` and `package/trainer/task_multi_gpu.py`; make any required changes (e.g. `GCP_REGION`, `model-training/cli-multi-gpu.sh:13`).
 - [ ] `sh cli-multi-gpu.sh` — `n1-standard-32` + 2 × T4: logs `Number of replicas: 2`, 15 steps per epoch; W&B project `cheese-training-multi-gpu-vertex-ai` with `global_batch_size: 64`.
 
 ### Not in the README · the Python-SDK launcher *(extra, optional)*
 
 *(§4 B16; it does not work as shipped)*
-- [ ] `export GCP_REGION=us-central1` — *(extra)* `cli.py:7` needs it; nothing else exports it (§6, item 3).
+- [ ] `export GCP_REGION=us-central1` — *(extra)* `model-training/cli.py:7` needs it; nothing else exports it (§6, item 3).
 - [ ] `python cli.py` — *(extra)* submits a `CustomPythonPackageTrainingJob` (look under Training → Training pipelines). As shipped, its `CMDARGS` has no `--wandb_key`, so the job crashes at `wandb.login` (§6, item 2): add one before trying it.
 
 ### Clean up *(extra)*
 
 *(§4 B17)*
 - [ ] `gsutil rm $GCS_BUCKET_URI/cheese-app-trainer.tar.gz` — *(extra)* inside the container (that is where `gsutil` lives); or delete the bucket in the console.
-- [ ] `exit` — leaves the container, which is removed (`--rm`).
+- [ ] `exit` — *(extra)* leaves the container, which is removed (`--rm`).
 - [ ] Console → Vertex AI → Training: no job `RUNNING`/`PENDING`.
 - [ ] Colab: *Runtime → Disconnect and delete runtime* in both notebooks.
 - [ ] End of term: delete the `model-trainer` key (IAM → Service accounts → Keys) and rotate your W&B key.
@@ -250,31 +250,32 @@ Your laptop never trains anything in the repo half. The Docker container you bui
 
 ```
  YOUR LAPTOP                                                      GOOGLE CLOUD  (project $GCP_PROJECT)
- +------------------------------------------------------+
+ +-------------------------------------------------------+
  |  AC215/                                               |
  |   +- model-training/  --bind mount--> /app            |
- |   +- secrets/model-trainer.json --bind mount--> /secrets
+ |   +- secrets/         --bind mount--> /secrets        |
+ |        model-trainer.json                             |
  |                                                       |
- |  +-------------------------------------------------+  |  (1) gsutil cp trainer.tar.gz        +--------------------------------+
- |  | container "model-training-cli"  (no ports)      |--+------------------------------------>| GCS bucket  gs://<your-bucket> |
- |  | python:3.13-slim-bullseye, linux/amd64          |  |      package-trainer.sh:4           |   cheese-app-trainer.tar.gz    |
- |  | gcloud + gsutil, venv /.venv (aiplatform SDK)   |  |                                     +---------------+----------------+
+ |  +-------------------------------------------------+  |  (1) gsutil cp trainer.tar.gz       +---------------------------------+
+ |  | container "model-training-cli"  (no ports)      |--+------------------------------------>| GCS bucket  gs://<your-bucket>  |
+ |  | python:3.13-slim-bullseye, linux/amd64          |  |      package-trainer.sh:4           |   cheese-app-trainer.tar.gz     |
+ |  | gcloud + gsutil, venv /.venv (aiplatform SDK)   |  |                                     +---------------+-----------------+
  |  | env: GOOGLE_APPLICATION_CREDENTIALS=/secrets/.. |  |  (2) gcloud ai custom-jobs create                   | pip install
- |  |      GCP_PROJECT  GCS_BUCKET_URI  WANDB_KEY     |--+------------------------------------>+---------------v----------------+
+ |  |      GCP_PROJECT  GCS_BUCKET_URI  WANDB_KEY     |--+------------------------------------>+---------------v-----------------+
  |  +-------------------------------------------------+  |      cli.sh:32-37 (HTTPS API)       | Vertex AI Training (us-central1)|
- +------------------------------------------------------+                                      |  provisions a VM per job        |
-                                                                                               +---------------+----------------+
+ +-------------------------------------------------------+                                     |  provisions a VM per job        |
+                                                                                               +---------------+-----------------+
                                                                                                                |
-              +------------------------------------------------------------------------------------------------v--+
+              +------------------------------------------------------------------------------------------------v----+
               | Vertex-managed VM: n1-standard-4 (+1 T4)   or   n1-standard-32 + 2 T4 (multi-GPU)                   |
-              |  prebuilt container  us-docker.pkg.dev/vertex-ai/training/tf-cpu.2-17.py310 (or tf-gpu.2-17/2-14)  |
+              |  prebuilt container  us-docker.pkg.dev/vertex-ai/training/tf-cpu.2-17.py310 (or tf-gpu.2-17/2-14)   |
               |    pip install cheese-app-trainer  (+ wandb==0.15.11)                                               |
               |    python -m trainer.task  --model_name=mobilenetv2 --train_base --epochs=2 --batch_size=32 ...     |
               |      |-- HTTPS GET github.com/dlops-io/datasets/releases/download/v4.0/cheese_4_labels.zip (~305 MB)|
               |      |-- tf.data pipeline -> MobileNetV2 (+Dense 128 +Dense 4) -> model.fit                         |
               |      |-- wandb.login / init / config.update / finish -------------------------> wandb.ai            |
-              |      |                                                     project cheese-training-vertex-ai         |
-              |      +-- stdout / stderr ------------------------------------------------------> Cloud Logging       |
+              |      |                                                     project cheese-training-vertex-ai        |
+              |      +-- stdout / stderr ------------------------------------------------------> Cloud Logging      |
               |  VM is torn down when the script exits. The trained model is NOT saved anywhere (see §9).           |
               +-----------------------------------------------------------------------------------------------------+
 

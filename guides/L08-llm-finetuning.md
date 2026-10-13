@@ -11,7 +11,7 @@
 - **Idea 4 · QLoRA = 4-bit quantization + LoRA：** NF4 把每个 weight 存成 16 个 level 之一的 4-bit index（double quant 再压缩 per-block constants，算的时候 dequantize 成 fp16）；LoRA 学 `ΔW = (α/r)·B·A`，B 初始化为 0，PEFT 对 Qwen3 默认只挂在 `q_proj`/`v_proj` 上，所以是 1,146,880 个 trainable params（0.30%），adapter 只有 4.6 MB。`print` 出来是 375.8 M 而不是 596 M，因为两个 4-bit weight 打包进一个 byte。
 - **Idea 5 · 怎么判断 work 了：** 同样 100 条 test data，adapter 关掉 vs 打开：loss 2.65 → 1.39，perplexity 14.15 → 4.00。但 loss 算的是所有 token（包括 question 和 template），所以它主要衡量 style fit，不代表答案更正确。
 - **最费时间的坑：** ① README 没说要改 code：`env.dev` 里的 `GCP_PROJECT`/`GCS_BUCKET_NAME`，`gemini-finetuner/cli.py:10-11` 写死的 `gs://cheese-dataset/...`，还有 `:107` 的 `MODEL_ENDPOINT`（instructor 的 endpoint）都要换成你自己的；bucket 要自己建，Vertex AI API 要自己 enable。② Ubuntu/Debian/WSL 上 `sh docker-shell.sh` 报 `source: not found`（`/bin/sh` 是 dash），改用 `bash docker-shell.sh`。③ `--generate` 把所有 error 都吞掉：key 没放在 repo **旁边**的 `secrets/llm-service-account.json`，五批全部失败，接着 `--prepare` 报 `KeyError: 'question'`。每一行输出都要读。
-- **Colab 的坑：** 别跳过 `!uv pip uninstall torchao`（否则 nb cell 86 merge 时报 ImportError）；别删 nb cell 72 的 fp32 cast（`fp16=True` 没法 unscale bf16 gradients）；改了 LoRA config 想重训，先重跑 nb cell 36 重新 load model。
+- **Colab 的坑：** 别跳过 `!uv pip uninstall torchao`（否则 nb cell 86 merge 时会报 ImportError；这是读 peft source 推断的，没有实测）；别删 nb cell 72 的 fp32 cast（`fp16=True` 没法 unscale bf16 gradients）；改了 LoRA config 想重训，先重跑 nb cell 36 重新 load model。
 - **做完要删：** `gcloud storage rm -r gs://<bucket>/llm-finetune-dataset-small`（或者删整个 bucket）；tuned model/endpoint 在 console 里删（L10 `cheese-app-v0` 还要用，可以留到 L10 之后）；不用的 SA key 删掉；本地 `docker image rm llm-dataset-creator gemini-finetuner`；Colab 用 *Runtime → Disconnect and delete runtime*，Drive 空间不够就删 `MyDrive/LLM_cache`。
 
 ## At a glance
@@ -103,9 +103,9 @@ Commands in backticks are exactly as the README, the code or the notebook writes
 ### Generate Question Answer Dataset
 
 *Run Container* (`README.md:79-94`)
-- [ ] `cd dataset-creator` — the README: "Make sure you are inside the `dataset-creator` folder" (`README.md:83`).
+- [ ] `cd dataset-creator` — *(extra)* the README only says "Make sure you are inside the `dataset-creator` folder" (`README.md:83`).
 - [ ] `sh docker-shell.sh` — sources `../env.dev`, builds image `llm-dataset-creator`, opens an interactive bash in `/app`. On Ubuntu/Debian/WSL use `bash docker-shell.sh` (§6.1).
-- [ ] `ls -la /secrets` — README tip (`README.md:69`): the key must be listed.
+- [ ] `ls -la /secrets` — the Prerequisites tip (`README.md:69`), run here because it needs the container: the key must be listed.
 - [ ] `which python` — *(extra)* `/.venv/bin/python`.
 - [ ] `python cli.py --help` — prints `usage: cli.py [-h] [--generate] [--prepare] [--upload]`.
 - [ ] `docker rm -f llm-dataset-creator` — *(extra, host)* only if you hit `Conflict. The container name "/llm-dataset-creator" is already in use`.
@@ -113,9 +113,9 @@ Commands in backticks are exactly as the README, the code or the notebook writes
 - [ ] `source /.venv/bin/activate` — *(extra)* in that second shell, otherwise `python cli.py` fails with `ModuleNotFoundError`.
 
 *Generate Text* (`README.md:98-155`)
-- [ ] Optional: change `NUM_ITERATIONS = 5` (`dataset-creator/cli.py:170`). The README's "default parameters" are module constants, not CLI flags.
 - [ ] `python cli.py --generate` — 5 Gemini calls → `data/cheese_qa_0.txt` … `cheese_qa_4.txt`. Errors are printed per batch, not raised: read every line.
 - [ ] `ls dataset-creator/data` — *(extra, host)* five `cheese_qa_*.txt` files, each a JSON array of ~20 objects.
+- [ ] Optional, for a larger dataset: change `NUM_ITERATIONS = 5` (`README.md:154`; in the code at `dataset-creator/cli.py:170`) and re-run `python cli.py --generate`. The README's "default parameters" (`README.md:106`) are module constants, not CLI flags.
 
 *Sample Question Answers* (`README.md:159-175`)
 - [ ] Open one `data/cheese_qa_*.txt` and compare it with the README sample. Expect different openers (§6.8).
@@ -133,13 +133,13 @@ Commands in backticks are exactly as the README, the code or the notebook writes
 ### Fine-tune Gemini
 
 *Run Container* (`README.md:232-247`)
-- [ ] `exit` — leave the dataset container (`--rm` deletes it).
-- [ ] `cd ../gemini-finetuner`
+- [ ] `exit` — *(extra)* leave the dataset container (`--rm` deletes it).
+- [ ] `cd ../gemini-finetuner` — *(extra)* the README only says "Make sure you are inside the `gemini-finetuner` folder" (`README.md:236`).
 - [ ] `sh docker-shell.sh` — builds image `gemini-finetuner` (fast: the layers up to `uv sync` are cached). `bash docker-shell.sh` on dash systems.
 - [ ] `python cli.py --help` — prints `usage: cli.py [-h] [--train] [--chat]`.
 
 *Fine-tune Model* (`README.md:251-261`)
-- [ ] `python cli.py --train` — submits the tuning job; after ~60 s prints `Job name: projects/<project-number>/locations/us-central1/tuningJobs/<id>` and `Tuned model info: None` (normal).
+- [ ] `python cli.py --train` — submits the tuning job and prints `Job name: projects/<project-number>/locations/us-central1/tuningJobs/<id>`; after ~60 s it prints `Tuned model info: None` (normal) and exits.
 - [ ] Console: [Agent Platform (formerly Vertex AI) → Tuning](https://console.cloud.google.com/agent-platform/tuning/managed). Watch the job until **Succeeded**, and check that its dataset URI is your bucket.
 - [ ] Optional *(extra)*: change `gemini-finetuner/cli.py:126` to `train(wait_for_job=True)` so the CLI polls every minute.
 
@@ -473,7 +473,7 @@ Commands in code spans are verbatim from the README, code or notebook unless mar
   2. In the GCP Console (IAM & Admin → Service accounts), create `llm-service-account`, grant **Storage Admin** and **Agent Platform User** (`roles/aiplatform.user`), then on its **KEYS** tab use **ADD Key → Create New Key → JSON** to download a key (`README.md:40-49`). Skip this if you already have this SA from L05.
   3. Create `secrets/` **next to** the repo and put the key there as `llm-service-account.json` (`README.md:50`). The layout must match `README.md:54-62`.
 - **Under the hood:** `env.dev:5` computes `SECRETS_DIR=$(pwd)/../../secrets/`. `$(pwd)` is evaluated when the script sources it, while you're inside `dataset-creator/` or `gemini-finetuner/`, so `../../secrets` is `<parent>/secrets`. That's the same folder L05's `docker-compose.yml` mounts as `../secrets` from the repo root.
-- **Checkpoint:** `ls <parent>/secrets` shows `llm-service-account.json`, not `…json.json` (`README.md:67`). *(extra)* `git -C llm-finetuning log -1 --oneline` shows `44ef6f0 remove pipfile from gemini-finetuning`, or newer.
+- **Checkpoint:** *(extra)* `ls <parent>/secrets` shows `llm-service-account.json`, not `…json.json` (`README.md:67`). *(extra)* `git -C llm-finetuning log -1 --oneline` shows `44ef6f0 remove pipfile from gemini-finetuning`, or newer.
 - **If it fails:** a key inside the repo would be ignored by `.gitignore:7` (`*.json`), but it would **not be mounted**. Move it.
 
 **Step 1. Edit `env.dev`** *(implied by the "CHANGE TO YOUR …" comments)*.
@@ -490,7 +490,7 @@ Commands in code spans are verbatim from the README, code or notebook unless mar
 
 ### Part A: Generate Question Answer Dataset (`README.md:75-222`)
 
-**Step 4. Build and enter the dataset container** (`README.md:83-88`): `cd dataset-creator`, then `sh docker-shell.sh`.
+**Step 4. Build and enter the dataset container** (`README.md:83-88`): `cd dataset-creator` *(extra; the README says "Make sure you are inside the `dataset-creator` folder")*, then `sh docker-shell.sh`.
 - **Under the hood:**
   1. `set -e` (`docker-shell.sh:4`) aborts on the first error.
   2. `source ../env.dev` (`:8`) loads the variables.
@@ -589,7 +589,7 @@ Commands in code spans are verbatim from the README, code or notebook unless mar
 
 ### Part B: Fine-tune Gemini (`README.md:228-316`)
 
-**Step 9. Enter the second container** (`README.md:236-247`): `exit`, then `cd ../gemini-finetuner`, `sh docker-shell.sh`, `python cli.py --help`.
+**Step 9. Enter the second container** (`README.md:236-247`): `exit`, then `cd ../gemini-finetuner` *(both extra; the README says "Make sure you are inside the `gemini-finetuner` folder")*, `sh docker-shell.sh`, `python cli.py --help`.
 - **Under the hood:** this is the same Dockerfile and the same `uv.lock`, byte-identical to dataset-creator's (`diff` shows no difference). Docker's layer cache reuses every layer up to and including `uv sync` (same base, same commands, same `pyproject.toml`/`uv.lock` content); only the final `COPY . ./` differs, so this build is fast. The image is `gemini-finetuner` (`docker-shell.sh:9`). The two `docker-shell.sh` files differ only in `IMAGE_NAME` and one blank line, which is why `source` is on line 7 here and line 8 in dataset-creator.
 - **Checkpoint:** `usage: cli.py [-h] [--train] [--chat]` with `--train  Train model` and `--chat  Chat with model`.
 - **If it fails:** the same as Step 4 (`gemini-finetuner/docker-shell.sh:7` is the `source` line).

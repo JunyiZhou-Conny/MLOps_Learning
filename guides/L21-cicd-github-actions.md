@@ -1,13 +1,13 @@
 # L21 · Automating Software Development: CI/CD with GitHub Actions II — study guide
 
-[Ed lesson](https://edstem.org/us/courses/97373/lessons/166046/) · Tutorial: [`dlops-io/cheese-app-ci-cd`](https://github.com/dlops-io/cheese-app-ci-cd) `main` @ [`b8458ff`](https://github.com/dlops-io/cheese-app-ci-cd/tree/b8458ff0cc1898700b32a873b4665f43f50df71e) (Part 5 · GitHub Actions Remote CI; the same repo and commit as L09) · Colab: none · Video: planned · Made from the verified digest, 2026-10-13
+[Ed lesson](https://edstem.org/us/courses/97373/lessons/166046/) · Tutorial: [`dlops-io/cheese-app-ci-cd`](https://github.com/dlops-io/cheese-app-ci-cd) `main` @ [`b8458ff`](https://github.com/dlops-io/cheese-app-ci-cd/tree/b8458ff0cc1898700b32a873b4665f43f50df71e) (Part 5 · GitHub Actions Remote CI; the same repo and commit as L09) · Colab: none for this lecture · Video: planned · Made from the verified digest, 2026-10-13
 
 ## 中文速览
 
 - **做什么：** 还是 L09 那个很小的 FastAPI service（`/`、`/health`、`/euclidean_distance/` 三个 endpoint，一个 `power()`，26 个 pytest test：11 unit、10 integration、5 system），这次让 GitHub 替你跑。`.github/workflows/ci.yml` 定义了 6 个 job：`build` 只 build 一次 Docker image（tag 是 commit SHA），`docker save` 成 tar，作为 artifact `docker-image` 传给 4 个并行 job（Black/Flake8、unit + coverage、integration、system），最后 `test-summary` 汇总结果；如果设了 repository secret `SLACK_WEBHOOK_URL`，再发一条 Slack。push 到 `main`/`develop`、或者开 PR 进这两个 branch 都会触发，结果就是 commit 和 PR 上的绿勾/红叉。全程不碰 GCP。
 - **Idea 1 · workflow 的结构：** event（`on:` 里的 `push` / `pull_request`）→ 一个 run → 多个 job → 每个 job 是一串 step（`run:` 是 shell，`uses:` 是现成的 action）。`push` 的 filter 看你 push 到哪个 branch，`pull_request` 的 filter 看 PR 的 *base* branch；PR run 里的 `github.sha` 是一个临时的 merge commit。
 - **Idea 2 · 每个 job 都是一台全新的 `ubuntu-latest` VM，job 之间什么都不共享：** 所以 image 要 `docker save` → `upload-artifact` → 每个 job 里再 `download-artifact` + `docker load`（`ci.yml:49-57` 这段 copy 了四遍）。lint 和 test 检查的是 bake 进 image 的 `/app/api`、`/app/tests`，不是 checkout 出来的文件。
-- **Idea 3 · `needs` 画出一个 DAG：** `build` fan-out 到 4 个 job；`test-summary` 用 `needs: [unit-tests, integration-tests, system-tests]` fan-in，加上 `if: always()` 才能在上游 fail 时照样跑、读 `needs.<job>.result`。`lint-and-format` 不在 `needs` 里，所以 Black fail 了，summary 和 Slack 还是说 "All tests passed"。
+- **Idea 3 · `needs` 画出一个 DAG：** `build` fan-out 到 4 个 job；`test-summary` 用 `needs: [unit-tests, integration-tests, system-tests]` fan-in，加上 `if: always()` 才能在上游 fail 时照样跑、读 `needs.<job>.result`。`lint-and-format` 不在 `needs` 里，所以 Black fail 了，summary 照样打印 "✅ All tests passed!"，Slack 照样发 "✅ CI Pipeline Passed"。
 - **Idea 4 · CI 只认 exit code：** Black 是 blocking（`continue-on-error: false`），Flake8 是 advisory（`continue-on-error: true`）。Black fail 之后 Flake8 这个 step 直接 skipped，你看不到它的 output。system test 有 `skipif`，server 没起来就是 "1 passed, 4 skipped"，job 还是绿的，所以 CI 先用 `curl -f … || exit 1` 卡住。
 - **Idea 5 · secret：** `SLACK_WEBHOOK_URL` 在 Settings → Secrets and variables → Actions 里加，log 里显示成 `***`，fork 来的 PR 拿不到。`if:` 里不能直接读 `secrets`，所以 repo 先用一个 step 在 shell 里判断，再把 `enabled=true/false` 写进 `$GITHUB_OUTPUT`。
 - **最费时间的坑：** ① 第一次 run 一定是红的：`src/api-service/api/utils.py:7`（`def power(base,exponent):`）加上三个空行让 Black fail；README 里全绿的截图 `assets/pipline.png` 来自另一个 code state。`pre-commit run --all-files` 修好、commit、push，六个 job 就全绿。② push 了却没有 run：workflow 必须在 repo **root** 的 `.github/workflows/`，放在 monorepo（比如 `MLOps_Learning`）的子文件夹里永远不会跑；只 push feature branch 也不会跑；fork 要先在 Actions tab 里 enable workflows。
@@ -62,10 +62,12 @@ Put the repo somewhere Actions can run it (§4 Step 0). The README only says "Cl
 *Route A: fork*
 - [ ] Fork `dlops-io/cheese-app-ci-cd` on GitHub, open your fork's **Actions** tab and click the button that enables workflows (Actions is disabled on forks until you do).
 - [ ] `git clone https://github.com/<you>/cheese-app-ci-cd.git` — *(extra)* clone your fork as its own repo, not inside another git repo (§6 G2, G3).
+- [ ] `cd cheese-app-ci-cd` — *(extra)*
 
 *Route B: your own empty repo*
 - [ ] Create an empty repo such as `<you>/cheese-app-ci-cd` on GitHub.
 - [ ] `git clone https://github.com/dlops-io/cheese-app-ci-cd.git` — *(extra)* the course repo, as its own clone.
+- [ ] `cd cheese-app-ci-cd` — *(extra)*
 - [ ] `git remote set-url origin https://github.com/<you>/cheese-app-ci-cd.git` — *(extra)* point `origin` at your repo.
 - [ ] `git push -u origin main` — *(extra)* push `main`; this push to `main` already starts a run.
 
@@ -910,7 +912,7 @@ def unused_function():
 | G7 | The `coverage-report-unit` artifact is missing or empty ("No files were found with the provided path: coverage/") *(reasoned, not run)*. | Docker creates the missing host dir `coverage/` as root, while the container user is uid 1000 (Dockerfile:23-28), so the HTML write fails, hidden by `continue-on-error: true` (`ci.yml:95`). `coverage.xml` is written to `/app` inside the container and discarded. On Docker Desktop for Mac, bind-mount ownership is relaxed, so the same command may work locally. | Add a step `mkdir -p coverage && chmod 777 coverage` before the run, and write XML into the mount: `--cov-report=xml:coverage/coverage.xml`. Optionally drop `continue-on-error` so problems are visible. |
 | G8 | Slack only ever says "✅ Passed"; failures are silent. | "Check test results" exits 1 (`ci.yml:188`), so "Check if Slack webhook is configured" (`194-201`), which has no `if:`, is skipped. `steps.slack-check.outputs.enabled` is then empty and the Slack condition (`204`) is false. | Add `if: always()` to the `slack-check` step. Better still, pass the secret via `env:` and test `"$SLACK_WEBHOOK_URL"` in shell. |
 | G9 | Slack step is skipped on PRs from forks, or the "View Commit" link is broken. | Secrets are not provided to workflows triggered from forks. `github.event.head_commit` exists only on `push` events (`ci.yml:231, 250`). | Expected behaviour. For links, use `${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}`. |
-| G10 | The run is red but the summary job (and Slack) say "All tests passed". | `test-summary` `needs` only the three test jobs (`ci.yml:175`); lint is not included. | Add `lint-and-format` to `needs` and to the check (Exercise E4). |
+| G10 | The run is red but the summary job says "✅ All tests passed!" (and Slack "✅ CI Pipeline Passed"). | `test-summary` `needs` only the three test jobs (`ci.yml:175`); lint is not included. | Add `lint-and-format` to `needs` and to the check (Exercise E4). |
 | G11 | Local Black/Flake8 disagree with CI. | Local commands use the default 88/79 columns: README.md:112, 121, 124, 495-496, 502-504, 528-531. CI uses 120 (`ci.yml:61, 66`). There is no `[tool.black]` in `pyproject.toml`. | Always pass `--line-length 120` / `--max-line-length=120`, or add `[tool.black]\nline-length = 120` to `pyproject.toml` and a `.flake8` file. |
 | G12 | Pre-commit passes locally but CI's Black fails, or vice versa. | Pre-commit pins Black `24.1.1` (`.pre-commit-config.yaml:30`). The image installs whatever is newest that satisfies `black>=24.1.1` (pyproject.toml:8), so the two drift as Black's yearly style changes land. README.md:564 hints at this. | Pin the same version in both places, or lock the dependencies. |
 | G13 | "Re-run failed jobs" the next day fails at "Download Docker image". | The image artifact expires after 1 day (`ci.yml:38`). | Use "Re-run all jobs", or raise the retention. |

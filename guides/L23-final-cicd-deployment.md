@@ -7,12 +7,12 @@
 - **做什么：** 把 L22 在 GKE 上手动 `pulumi up` 部署的 Formaggio cheese app（Next.js frontend + FastAPI API + ChromaDB vector DB + loader Job）接上 GitHub Actions，让 `git push` 到 `main` 变成 deploy 按钮。commit message 里有 `/deploy-app`：一台全新的 GitHub runner build `deployment` toolbox container，跑 `deploy-k8s-update.sh`（两次 `pulumi up`，先 `deploy_images` 再 `deploy_k8s`），pod 被 rolling update。有 `/run-…`：runner build `workflow` container，把 L15 的 KFP pipeline 提交到 Vertex AI Pipelines。
 - **Idea 1 · 只有 CD，没有 CI：** 两个 workflow 都叫 "Continuous Integration and Continuous Deployment"，但一个 test 都不跑，`README.md:157` 自己也承认。broken API 和好的 API ship 得一样快。L21 的 `ci.yml` 是缺的那一半，MS5 要你补上（tests on every PR、merge 到 `main` 就 deploy、≥70% coverage）。
 - **Idea 2 · commit message 就是 trigger：** 每次 push 到 `main`，两个 workflow 都会 run，真正做决定的是 job-level 的 `if: contains(github.event.head_commit.message, '/deploy-app')`（`app-ci-cd-gcp.yml:9`）。`contains()` 是 substring 匹配、case-insensitive，而且只看这次 push 的**最后一个** commit。
-- **Idea 3 · 同一个 toolbox container，laptop 和 runner 通用：** v4 只改了两处：`Dockerfile:72` 的 `ADD --chown=app:app . /app` 把代码 bake 进 image（runner 上没有 `/app` 的 mount）；entrypoint 有参数时把它当 script 跑（`docker-entrypoint.sh:32-40`）。image 实际由 host 的 Docker daemon build（mount 了 `/var/run/docker.sock`，即 Docker-out-of-Docker）。
+- **Idea 3 · 同一个 toolbox container，laptop 和 runner 通用：** 为了能在 runner 上跑，v4 只加了两处改动：`Dockerfile:72` 的 `ADD --chown=app:app . /app` 把代码 bake 进 image（runner 上没有 `/app` 的 mount）；entrypoint 有参数时把它当 script 跑（`docker-entrypoint.sh:32-40`）。image 实际由 host 的 Docker daemon build（mount 了 `/var/run/docker.sock`，即 Docker-out-of-Docker）。
 - **Idea 4 · timestamp tag 接力：** `deploy_images` 每次 run 都生成新的 `%Y%m%d%H%M%S` tag，export 到 GCS bucket 里的 Pulumi state；`deploy_k8s` 用 `pulumi.StackReference("organization/deploy-images/dev")` 读回来，填进 pod template。template 一变，Kubernetes 就 rolling update。所以就算代码没改，`/deploy-app` 也会重新 build 三个 image、换掉 pod。
 - **Idea 5 · 三个 identity：** repo secret `GOOGLE_APPLICATION_CREDENTIALS` 存的是 `deployment` service account 的 JSON key，一路传进 container 里的 `gcloud auth activate-service-account`；cluster 里的 API pod 走 Workload Identity（KSA `api-ksa` → GSA `gcp-service`），不需要 key；Vertex pipeline 的 step 以 `ml-workflow` SA 的身份跑。
-- **最费时间的坑：** ① `README.md:162` 写的 `/run-deploy-app` 什么都不 deploy：它匹配的是 `/run-`，触发 ML workflow，然后三个 step 全部 skip。要写 `/deploy-app`。② instructor 的 `ac215-project`、bucket 名和 SA email hard-code 在两个 workflow YAML、三个 `Pulumi.dev.yaml` 和 `docker-shell.sh` 里，README 只提了一处（`README.md:78`）；全部改完，先用**不带** keyword 的 commit push。③ v4 的 `deploy_k8s/Pulumi.dev.yaml:7` 打开了 `setupSSL`，第一次 v4 `pulumi up` 会把 L22 的 NGINX ingress 换成 Google HTTPS load balancer：IP 变了，README 说的 `nginx_ingress_ip` 这个 output 根本不存在（看 `app_url`），managed certificate 也要等一阵才 Active。
+- **最费时间的坑：** ① `README.md:162` 写的 `/run-deploy-app` 什么都不 deploy：它匹配的是 `/run-`，触发 ML workflow，然后三个 step 全部 skip。要写 `/deploy-app`。② instructor 的 `ac215-project`、bucket 名和 SA email hard-code 在两个 workflow YAML、三个 `Pulumi.dev.yaml` 和两个 `docker-shell.sh`（`src/deployment/`、`src/workflow/`）里，README 只提了一处（`README.md:78`）；全部改完，先用**不带** keyword 的 commit push。③ v4 的 `deploy_k8s/Pulumi.dev.yaml:7` 打开了 `setupSSL`，第一次 v4 `pulumi up` 会把 L22 的 NGINX ingress 换成 Google HTTPS load balancer：IP 变了，README 说的 `nginx_ingress_ip` 这个 output 根本不存在（看 `app_url`），managed certificate 也要等一阵才 Active。
 - **其他会骗你的地方：** `deploy-k8s-update.sh` 没有 `set -e`，image build 失败了 run 照样可能是绿的；CI 不会重新 build data-collector / data-processor image（只有手动 `sh deploy-ml-images.sh` 会）；`/run-ml-pipeline` 每次都新建一个 Vertex endpoint（`n1-standard-4`，24/7 计费），而 app 根本不调用它。
-- **做完要删：** 在 deployment container 里 `cd /app/deploy_k8s && pulumi destroy --stack dev --refresh -y`（regional GKE cluster、node、static IP + HTTPS LB、Cloud NAT、PVC disk）；Vertex AI 里每个 endpoint 先 undeploy model 再 delete；Artifact Registry 的旧 tag（`retain_on_delete=True`，destroy 不会删）；最后删掉 GitHub 上的 `GOOGLE_APPLICATION_CREDENTIALS` secret 和 `deployment` key，或者 disable 两个 workflow。
+- **做完要删：** 在 deployment container 里 `cd /app/deploy_k8s && pulumi destroy --stack dev --refresh -y`（regional GKE cluster、node、static IP + HTTPS LB、Cloud NAT、PVC disk）；Vertex AI 里每个 endpoint 先 undeploy model 再 delete；手动删 Artifact Registry 的旧 tag（`retain_on_delete=True`，destroy 不会删）；最后删掉 GitHub 上的 `GOOGLE_APPLICATION_CREDENTIALS` secret 和 `deployment` key，或者 disable 两个 workflow。
 
 ## At a glance
 
@@ -76,7 +76,7 @@ Paths without a repo prefix are relative to `cheese-app-v4/`, and every `path:li
 
 ## Command checklist
 
-Commands in backticks are exactly as the README (or the file named next to them) writes them; placeholders such as `<your-project>` are kept. Plain items are console clicks or file edits. Items marked *(extra)* are not in the README; they come from §2, §4, §6 and §8 of this guide. Run `pulumi`, `kubectl` and the `sh deploy-*.sh` scripts inside the `deployment` container; run `git` outside it ("**Do this outside the container**", `README.md:187`).
+Commands in backticks are exactly as the README (or the file named next to them) writes them; placeholders such as `<your-project>` are kept. Where the README only says "cd into `<folder>`", the item gives the equivalent `cd` command and quotes the README's wording next to it. Plain items are console clicks or file edits. Items marked *(extra)* are not in the README; they come from §2, §4, §6 and §8 of this guide. Run `pulumi`, `kubectl` and the `sh deploy-*.sh` scripts inside the `deployment` container; run `git` outside it ("**Do this outside the container**", `README.md:187`).
 
 ### Before the README *(extra)*
 
@@ -113,7 +113,7 @@ Commands in backticks are exactly as the README (or the file named next to them)
 - [ ] `sh docker-shell.sh` — builds `cheese-app-deployment` for `linux/amd64`, logs gcloud and Pulumi in, and leaves you at a bash prompt in `/app`.
 
 *Build and Push Docker Containers to Google Artifact Registry* (README.md:81-91; only if you did not build and push images in the last tutorial)
-- [ ] `cd deploy_images`
+- [ ] `cd deploy_images` — "cd into `deploy_images`", inside the container.
 - [ ] `pulumi stack select dev` — selects the stack in the GCS state bucket.
 - [ ] `pulumi stack init dev` — *(extra)* only if the select said `no stack named 'dev' found` (§6 #5).
 - [ ] `pulumi up --stack dev -y` — builds and pushes the api-service, frontend-react and vector-db-cli images, all with one timestamp tag.
@@ -137,7 +137,7 @@ Commands in backticks are exactly as the README (or the file named next to them)
 - [ ] Copy the `nginx_ingress_ip` from the terminal. In v4, use the `ip_address` or `app_url` output.
 - [ ] Go to `http://<YOUR INGRESS IP>.sslip.io` — redirected to `https://<ip>.sslip.io` (the `app_url`).
 - [ ] `kubectl describe managedcertificate managed-certificates -n cheese-app-namespace` — *(extra)* while HTTPS still fails: shows whether the managed cert is still provisioning.
-- [ ] Check the footer: `Frontend version: 1` and `API version: 1.0.1`.
+- [ ] *(extra)* Check the footer: `Frontend version: 1` and `API version: 1.0.1`.
 
 ### Setup GitHub Action Workflow Credentials
 
@@ -159,8 +159,8 @@ Commands in backticks are exactly as the README (or the file named next to them)
 - [ ] `git add .` — outside the container.
 - [ ] `git commit -m "update frontend and backend version and header color /deploy-app"` — the keyword is `/deploy-app`, not README.md:162's `/run-deploy-app` (§6 #1).
 - [ ] `git push`
-- [ ] Actions tab: open the run named `<you> submitted a CI CD Action for App Deployment` and follow "Build Deployment Container" and "Run Deploy App". The ML workflow's run for the same push shows its job as skipped.
-- [ ] Reload `app_url` and scroll: the footer reads `Frontend version: 2.2` and `API version: 2.0`, and the header turns sky blue.
+- [ ] *(extra)* Actions tab: open the run named `<you> submitted a CI CD Action for App Deployment` and follow "Build Deployment Container" and "Run Deploy App". The ML workflow's run for the same push shows its job as skipped.
+- [ ] *(extra)* Reload `app_url` and scroll: the footer reads `Frontend version: 2.2` and `API version: 2.0`, and the header turns sky blue.
 - [ ] `gcloud container clusters get-credentials cheese-app-cluster --region us-central1 --project <your-project>` — *(extra)* inside your local deployment container.
 - [ ] `kubectl get deploy -n cheese-app-namespace -o wide` — *(extra)* the IMAGES column shows the new `:<timestamp>`.
 - [ ] `kubectl rollout history deployment/api -n cheese-app-namespace` — *(extra)* one more revision per deploy.
@@ -170,7 +170,7 @@ Commands in backticks are exactly as the README (or the file named next to them)
 - [ ] `/run-ml-pipeline` — in the commit message, then push: runs the entire Vertex AI pipeline (collect → process → train → deploy) and creates **another** billed endpoint.
 - [ ] `/run-data-collector` — in the commit message, then push: runs only the data collector pipeline (writes `gs://<bkt>/raw.zip`).
 - [ ] `/run-data-processor` — in the commit message, then push: runs only the data processor pipeline (writes `gs://<bkt>/clean.zip`).
-- [ ] Vertex AI > Pipelines: the run appears; for the full pipeline, four green nodes, a new model in Model Registry and a new endpoint under Online prediction. §4 Part E does the three keywords cheapest first: collector, processor, full pipeline.
+- [ ] *(extra)* Vertex AI > Pipelines: the run appears; for the full pipeline, four green nodes, a new model in Model Registry and a new endpoint under Online prediction. §4 Part E does the three keywords cheapest first: collector, processor, full pipeline.
 
 ### If something goes wrong *(extra)*
 
@@ -445,7 +445,7 @@ The README has six parts. Below, each README step is numbered in order. Steps th
 **A3. Replace the instructor's project values (only partly in README).**
 - `README.md:78` says to change `GCP_PROJECT` in `docker-shell.sh`. You also need every row of the table in §2: the `Pulumi.dev.yaml` files, both workflow YAMLs, and the ML bucket and SA names.
 - Then commit these edits **without** a trigger keyword. Otherwise CI starts before your cluster exists.
-- Note: the pinned commit's own message is "Test pipeline /run-ml-pipeline", so pushing the unmodified clone to a new repo makes that commit the push's `head_commit` and starts the ML workflow. Push after this A3 commit instead.
+- Note: the pinned commit's own message is "Test pipeline /run-ml-pipeline", so pushing the unmodified clone to a new repo makes that commit the push's `head_commit` and starts the ML workflow *(reasoned, not run)*. Push after this A3 commit instead.
 
 ### Part B: make sure the cluster is up (README.md:72-129)
 

@@ -10,8 +10,8 @@
 - **Idea 3 · content addressing：** `dvc add` 给每个文件算 md5，存到 `.dvc/cache/files/md5/<前 2 位>/<后 30 位>`，再把 sorted manifest（`.dir`）也 hash 一次，这个 md5 就是整个 dataset version 的身份。`Image_1.jpg`…`Image_4.jpg` 在任何机器上都得到 `89db50de27acfd6822faabc3da39b0a8.dir`、`size: 611101`、`nfiles: 4`（正好是 class repo 的 `dataset_v20`）。DVC 存整个文件、按文件去重，不存 diff；加一张图，`dvc push` 只传新图和新 manifest。
 - **Idea 4 · pointer 在 git，bytes 在 bucket，名字在 tag：** git 只 track `.dvc/config`、`.dvcignore`、`cheese_dataset.dvc` 这些小文件；还原一个版本走的是 tag → commit → `cheese_dataset.dvc` → `.dir` manifest → blobs。忘了 `dvc push` 或者删了 `dvc_store/`，tag 就指向空气。GCS 的 Object Versioning 代替不了它：那只保留单个 object 的旧版本，不是一组文件的 snapshot。
 - **Idea 5 · bucket 看起来像 folder：** entrypoint 用 `gcsfuse` 把整个 bucket mount 到 `/mnt/gcs_data`，再 `mount --bind /mnt/gcs_data/images /app/cheese_dataset`，所以 container 要 `--privileged` + `/dev/fuse`。这些 mount 只存在于 container 的 mount namespace：host 上的 `data-versioning/cheese_dataset/` 永远是空的，本机唯一的副本是 `dvc add` 之后 `.dvc/cache/` 里的那份。
-- **最费时间的坑：** ① README 让你 clone 的 starter branch `data-versioning-ac215` 在 `Dockerfile:36` 还在装已经下架的 `google-cloud-sdk`，2026 年 10 月 image build 一定失败；build 之前改成 `google-cloud-cli`（`main` 早就改了）。② README 从来没让你先往 `images/` 放图片：`images/` 是空的，或者图片是用 CLI 上传的、没有 folder placeholder object（gcsfuse 没开 `--implicit-dirs`），`cheese_dataset` 就是空的，甚至 bind mount 直接失败。entrypoint 没有 `set -e`，照样给你一个 shell，所以 `dvc add` 之前一定先 `ls cheese_dataset`。
-- **其他要改、要知道的：** 两个 repo 都找 `../secrets/data-service-account.json`（repo 旁边的 `secrets/`；repo folder 必须叫 `data-labeling`）；bucket 名要改 `data-labeling/docker-shell-CLI.sh:23`（用 compose 还要改 `docker-compose.yml:17`）和 `data-versioning/docker-shell.sh:7`。`cli.py -p/-t` 报 `401` 多半是复制了 JWT Personal Access Token（`eyJ` 开头），legacy `Client` 只认 legacy token。Colab 默认指向 class repo 和 class bucket，你读不了：换成你自己的 repo URL 和 tag（private repo 要带 token）。lecture 标题里的 "Monitoring" 没有对应的 tutorial。
+- **最费时间的坑：** ① README 让你 clone 的 starter branch `data-versioning-ac215` 在 `Dockerfile:36` 还在装已经下架的 `google-cloud-sdk`，2026 年 10 月 image build 一定失败；build 之前改成 `google-cloud-cli`（`main` 已经改了）。② README 从来没让你先往 `images/` 放图片：`images/` 是空的，或者图片是用 CLI 上传的、没有 folder placeholder object（gcsfuse 没开 `--implicit-dirs`），`cheese_dataset` 就是空的，甚至 bind mount 直接失败。entrypoint 没有 `set -e`，照样给你一个 shell，所以 `dvc add` 之前一定先 `ls cheese_dataset`。
+- **其他要改、要知道的：** 两个 repo 都找 `../secrets/data-service-account.json`（repo 旁边的 `secrets/`；Part A 的 repo folder 必须叫 `data-labeling`）；bucket 名要改 `data-labeling/docker-shell-CLI.sh:23`（用 compose 还要改 `docker-compose.yml:17`）和 `data-versioning/docker-shell.sh:7`。`cli.py -p/-t` 报 `401` 多半是复制了 JWT Personal Access Token（`eyJ` 开头），legacy `Client` 只认 legacy token。Colab 默认用 class repo，它的 DVC remote 是 class bucket，你多半没有读权限：换成你自己的 repo URL 和 tag（private repo 要带 token）。lecture 标题里的 "Monitoring" 没有对应的 tutorial。
 - **做完要删：** `docker stop data-label-studio` 再 `docker rm data-label-studio`，`docker network rm data-labeling-network`，可选在 CLI container 里 `python cli.py -r` 去掉 CORS；不再用的 service-account key 在 IAM 里删掉。bucket 每月不到一美分；**只要还想要这些 dataset versions，就别删 `dvc_store/`**，删了 GitHub 上每个 `dataset_v*` tag 都会失效。
 
 ## At a glance
@@ -157,7 +157,7 @@ You use up to three terminals: one in `data-labeling` (Label Studio and the CLI 
 
 *(`data-labeling/README.md:182-187`)*
 - [ ] Open your bucket → `cheeses_labeled`: one object per submitted annotation. Open one to see the JSON (`image` URI and `result`).
-- [ ] If annotations made before you added target storage are missing, click *Sync* on the target storage card.
+- [ ] *(extra)* If annotations made before you added target storage are missing, click *Sync* on the target storage card.
 
 ### Part A · View Annotations using CLI
 
@@ -172,7 +172,7 @@ You use up to three terminals: one in `data-labeling` (Label Studio and the CLI 
 - [ ] `docker ps` — find the running containers.
 - [ ] `docker stop <container_name_or_id>` — stop them (leave the CLI container with `exit` first).
 - [ ] `docker rm data-label-studio` — *(extra)* `docker stop` alone leaves the container and its name behind (§6, item 6).
-- [ ] `sh docker-shell-compose.sh` — ensures the network, builds `data-label-cli`, then `docker-compose run --rm --service-ports data-label-cli` starts Label Studio first and gives you a shell in a one-off CLI container.
+- [ ] `sh docker-shell-compose.sh` — the README says "run them together using `docker-shell-compose.sh`"; ensures the network, builds `data-label-cli`, then `docker-compose run --rm --service-ports data-label-cli` starts Label Studio first and gives you a shell in a one-off CLI container.
 - [ ] `docker compose run --rm --service-ports data-label-cli` — *(extra)* replacement for line 12 of `docker-shell-compose.sh` if you get `docker-compose: command not found` (§6, item 8).
 - [ ] `docker compose down` — *(extra)* after you exit the CLI shell, `data-label-studio` keeps running; this stops it.
 
@@ -275,7 +275,7 @@ You use up to three terminals: one in `data-labeling` (Label Studio and the CLI 
 
 *([notebook](https://colab.research.google.com/drive/1RRQ1SlHq5lKK76R8LoQdi5LjCnND3jTq?usp=sharing); cells numbered from 0)*
 - [ ] Cell 5: *File → Save a copy in Drive*.
-- [ ] Cell 7: run `!pip install dvc dvc-gs` (the stored run installed `dvc-3.63.0` and `dvc_gs-3.0.2`).
+- [ ] Cell 7: run `!pip install dvc dvc-gs` (the stored run installed `dvc-3.63.0` and `dvc-gs-3.0.2`).
 - [ ] Cell 9: run the imports. It must run, because it imports `auth` (`from google.colab import auth`), which cell 11 uses.
 - [ ] Cell 11: run `auth.authenticate_user()` and pick the Google account that can read *your* bucket.
 - [ ] Cell 13: `!dvc list -R https://github.com/dlops-io/data-versioning.git` — replace the URL with your repo (a private repo needs `https://<user>:<token>@github.com/<you>/data-versioning`).
@@ -519,7 +519,7 @@ If `AC215/` itself is a git repository (for example an `MLOps_Learning`-style st
 
 ## 4. Step-by-step walkthrough
 
-Commands in `bash` blocks are copied exactly from the READMEs or scripts. The only exception is `<YOUR_TOKEN>` in A13, a placeholder added here where the README says "followed by your Access Token". Commands in `text` blocks are copied exactly from the Colab notebook cells. Run every step from the folder named in the step.
+Commands in `bash` blocks are copied exactly from the READMEs or scripts. The exceptions are `<YOUR_TOKEN>` in A13, a placeholder added here where the README says "followed by your Access Token", and the `sh` in front of the script names in A10 and A14, where the README only names the script ("Run `docker-shell-CLI.sh`", "using `docker-shell-compose.sh`"). Commands in `text` blocks are copied exactly from the Colab notebook cells. Run every step from the folder named in the step.
 
 ### Part A — Label Studio (`data-labeling`, branch `main`)
 
@@ -638,7 +638,7 @@ python cli.py -m
   - `-k argument i required…`: you forgot `-k` (`data-labeling/cli.py:122-123`).
 
 **A14 (Extra). Run both containers with compose**
-- Action: stop the containers, then run `docker-shell-compose.sh` (`data-labeling/README.md:218`):
+- Action: stop the containers, then run `docker-shell-compose.sh` (`data-labeling/README.md:218`), the same way as A6:
   ```bash
   sh docker-shell-compose.sh
   ```
