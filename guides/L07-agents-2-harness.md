@@ -72,7 +72,7 @@
 
 ## Command checklist
 
-Run on the **host** until `bash docker-shell.sh` opens the container shell; after that, "Run every remaining command inside the container, from `/app`" (`README.md:108`). Commands are exactly as the README writes them (placeholders kept) and in README order; the one exception is noted where it occurs. **Live** commands call OpenAI and cost tokens; `--fixture`, `--preview-context` and the tests are offline. Items marked *(extra)* are not in the README; they come from §2 and §4 of this guide. Items without a shell command are README notebook cells or manual steps.
+Run on the **host** until `bash docker-shell.sh` opens the container shell; after that, "Run every remaining command inside the container, from `/app`" (`README.md:108`). Commands are exactly as the README writes them (placeholders kept) and in README order; the two exceptions (the notebook test commands in Setup) are noted where they occur. **Live** commands call OpenAI and cost tokens; `--fixture`, `--preview-context` and the tests are offline. Items marked *(extra)* are not in the README; they come from §2 and §4 of this guide. Items without a shell command are README notebook cells or manual steps.
 
 ### Before the README *(extra)*
 
@@ -121,7 +121,6 @@ Run on the **host** until `bash docker-shell.sh` opens the container shell; afte
 
 *(README.md:256-336, in README order; "Inspect the context first" is offline and can be run before the live commands)*
 - [ ] `python cli.py --act 2 --compare` — live, two fresh sessions on `personalized`; prints the `📊 Comparison — customer preference match` table and both answers.
-- [ ] Add `--json-output outputs/context-comparison.json` to the `--compare` command to save the table (`README.md:859-861`).
 - [ ] `python cli.py --act 2 --scenario personalized --context basic` — live; one full run, then the evidence block and the PA/NY counterexample.
 - [ ] `python cli.py --act 2 --scenario personalized --context enriched` — live; the same with the saved profile injected.
 - [ ] `python cli.py --act 2 --scenario preference-override --context enriched` — live; today's funk 4+ request must win over the saved mild preference.
@@ -194,9 +193,16 @@ Run on the **host** until `bash docker-shell.sh` opens the container shell; afte
 - [ ] Read the "What persists between commands?" table (`README.md:805-816`).
 - [ ] End-of-lecture reflection: pick one completed run and answer the five questions (`README.md:818-826`).
 
+### Troubleshooting
+
+*Act 2 comparison command* (README.md:849-866), optional variants of commands above:
+- [ ] Add `--scenario preference-override` to `python cli.py --act 2 --compare` — live; today's request takes priority, and the all-mild rubric does not declare a winner (`README.md:858-859`).
+- [ ] Add `--show-json` for full progress details, or `--json-output outputs/context-comparison.json` to save the table (`README.md:859-861`).
+- [ ] `python cli.py --compare BEFORE AFTER` — compares two saved evaluation labels without running the agents (`README.md:865-866`; used in "6. Evaluation", Step 3, above).
+
 ### After the README *(extra)*
 
-- [ ] `exit` — leave the first container shell; `--rm` deletes the container.
+- [ ] `exit` — *(extra)* leave the first container shell; `--rm` deletes the container.
 - [ ] `docker stop agent-harness` — *(extra)* only if the container is still running (you exited only a `docker exec` shell).
 - [ ] `docker image rm agent-harness` — *(extra)* reclaim the image.
 - [ ] `rm -rf outputs/` — *(extra, optional)* on the host; deletes the SQLite traces, reports and HTML files.
@@ -385,7 +391,7 @@ host (YOU) decides -> WorkflowOrders.resume(...) -> revalidate_and_place -> rece
 - **Mental model:** A railway with switches. The model is a passenger choosing a seat; the switches are Python. An approval is a stamp on *one exact ticket*, not a general permission.
 - **Analogy:** A manager initials a specific receipt. If a line changes, the initials no longer apply. If the shelf is emptied before checkout, the sale still fails.
 - **Misconception:** "Approved means placed." Act 6 `two-orders` shows two approvals, one order placed and one blocked by the final stock check (`README.md:651`). Inventory is rechecked, not approved (`checkout.py:29`).
-- **Worked example:** Two runs show the two gates. In `pa-shipping`, attempt 1 is rejected at `validate` with `shipping: comte`, goes back along the revise edge, and the model swaps Comté for another cheese; attempt 2 passes. In the `manager-approval` fixture, the valid $220.80 cart reaches `manager_approval` and the graph pauses with a ticket carrying the fingerprint hash. After you type `approve`, `revalidate_and_place` compares the cart's fingerprint and `checkout_key` with the ticket's; they match, and a receipt is issued.
+- **Worked example:** Two runs show the two gates. In `pa-shipping`, attempt 1 is rejected at `validate` with `shipping: comte`, goes back along the revise edge, and the model swaps Comté for another cheese; if the replacement cart is valid, attempt 2 passes. In the `manager-approval` fixture, the valid $220.80 cart reaches `manager_approval` and the graph pauses with a ticket carrying the fingerprint hash. After you type `approve`, `revalidate_and_place` compares the cart's fingerprint and `checkout_key` with the ticket's; they match, and a receipt is issued.
 
 ### 3.5 Long tasks: task list ≠ history ≠ memory ≠ approval ≠ audit, and compaction vs refresh
 - **Explanation:** Act 4 builds the agent with the SDK's `create_harness_agent` (`acts/act4_harness.py:13-25`) and adds `Planning()`, `Memory()` and `Compaction()`. The harness separates five kinds of state:
@@ -456,7 +462,7 @@ The README's own advice: "The acts are separate demonstrations… do not expect 
 
 **A1. Get the code.**
 - **Action:** `git clone https://github.com/dlops-io/agent-harness.git` (the repo URL is on the course site at `tutorials_demo.md:108`; the README assumes "A local copy… with a terminal open in the `agent-harness` directory", `README.md:48`). Then `cd agent-harness`.
-- **Check:** `ls` shows `cli.py acts formaggio prompts skills data notebooks tests Dockerfile docker-shell.sh`.
+- **Check:** `ls` shows, among others, `cli.py acts formaggio prompts skills data notebooks tests Dockerfile docker-shell.sh`.
 
 **A2. Start the container** (`README.md:94-102`). Run on the **host**:
 ```bash
