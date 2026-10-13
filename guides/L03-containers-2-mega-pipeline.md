@@ -31,7 +31,7 @@
 **What it costs.** Nothing on your own GCP bill: the bucket, Speech-to-Text, Gemini, Text-to-Speech and Translation are all used through the course's key and project. The ElevenLabs bonus uses your own ElevenLabs quota. Docker Hub public repos are free. Locally, the five images list at 1.48 GB (`transcribe_audio`) and 842–846 MB each (the other four); they share their base layers.
 
 **Tear down, exactly** (none of this is in the README; it is all *(extra)*):
-1. `docker image rm transcribe_audio generate_text synthesis_audio_en translate_text synthesis_audio` (captured, §4 Step 26).
+1. `docker image rm transcribe_audio generate_text synthesis_audio_en translate_text synthesis_audio` (captured, §4 Step 27).
 2. `docker image prune -f` and `docker builder prune`: older builds and the build cache can still hold your key (§6 G1, §8 B5). Not captured.
 3. Nothing in GCP: you created no VM, bucket or service account. Your outputs stay in the shared bucket under your group's prefix.
 4. The key: keep it out of every repository (including your own study repo, §6 G14). If you ever pushed an image that contains it, delete that Docker Hub repository and tell the staff so the key can be rotated.
@@ -39,7 +39,7 @@
 <details>
 <summary><b>Versions and sources this guide was checked against</b></summary>
 
-- **README sections this lecture covers** (course site source `tutorials_demo.md:46-52`, which links only the repo; lecture date Sep 10 per `_modules/week-02.md:13-15`), in `main`'s `README.md`:
+- **README sections this lecture covers** (course site source `tutorials_demo.md:46-52`, which links only the repo; lecture date Sep 10 per `_modules/week-02.md:9-11`), in `main`'s `README.md`:
   - `## Prerequisites` `:22-26`; `## Clone this Repository` `:30-37` (anchor `#clone-this-repository`); `## What You’ll Learn` `:41-46`; `## 👥 You'll work in teams — and there's a leaderboard 🏆` `:50-56`
   - `## Connecting the Pipeline Components` `:60-67`, `### GCS Bucket Details` `:71-86`
   - `## GCP Credentials File` `:90-101`, `### 🔑 Important Note on Secrets` `:103-106`
@@ -108,7 +108,7 @@ Commands in backticks are exactly as the README writes them (placeholders kept).
   - Note: the number comes from **your** laptop's Python. If yours says `>=3.13` or higher, change it to `requires-python = ">=3.12"` (or delete the file and run `uv init --bare --python 3.12`). This fix is not in the README; without it, the image's `uv sync` downloads a different Python (§6 G3).
 
 *Create Dockerfile* (`:36-92`)
-- [ ] Create a file named `Dockerfile` (no extension) [A4]: the line `FROM python:3.12-slim-bookworm` (named in the text at `:41`), then the six code blocks in order: `:45`, `:50-55`, `:60-69`, `:76-77`, `:82-83`, `:88-89`. The assembled 30-line file is in §4 Step 7.
+- [ ] Create a file named `Dockerfile` (no extension) [A4]: the line `FROM python:3.12-slim-bookworm` (named in the text at `:41`), then the six code blocks in order: `:45`, `:50-55`, `:60-69`, `:76-77`, `:82-83`, `:88-89`. The assembled 30-line file is in §4 Step 6.
   - Note: the appendix's sample (`README.md:175-225`) has `ARG DEBIAN_PACKAGES="build-essential curl"` (`README.md:179`), with no `ffmpeg`. Don't paste it unchanged into `transcribe_audio` (§6 G8).
 - [ ] `ls -a; git status` — *(extra)* `Dockerfile` and `pyproject.toml` are there, and Git still says `nothing to commit, working tree clean`: `transcribe_audio/.gitignore:5-6` ignores both (§6 G14).
 
@@ -149,7 +149,7 @@ Commands in backticks are exactly as the README writes them (placeholders kept).
   - Note: works, but the token stays in your shell history and Docker warns that `--password` on the command line is insecure. Prefer `docker login -u <USER NAME>` and paste the token at the prompt (§6 G13).
 - [ ] `docker tag transcribe_audio <USER NAME>/transcribe_audio` — not captured.
 - [ ] `docker push <USER NAME>/transcribe_audio` — not captured.
-  - Note: **stop first.** Built as the README says, the image contains `/app/secrets/mega-pipeline.json` (captured with a stand-in file, §4 Step 23). Do the `.dockerignore` steps under *After the README* and rebuild before any push. An image built on Apple Silicon is `linux/arm64` only (§6 G6).
+  - Note: **stop first.** Built as the README says, the image contains `/app/secrets/mega-pipeline.json` (captured with a stand-in file, §4 Step 24). Do the `.dockerignore` steps under *After the README* and rebuild before any push. An image built on Apple Silicon is `linux/arm64` only (§6 G6).
 
 ### Task B · `generate_text` (`generate_text/README.md`)
 
@@ -259,7 +259,7 @@ Commands in backticks are exactly as the README writes them (placeholders kept).
 
 ### After the README *(extra, recommended)*
 
-*Keep the key out of the image* (§4 Steps 22–24)
+*Keep the key out of the image* (§4 Steps 24–25)
 - [ ] `docker run --rm --entrypoint ls transcribe_audio -la /app/secrets` — *(extra)* with no mount, lists `mega-pipeline.json`: the key is **inside** the image.
 - [ ] `printf 'secrets/\n' > .dockerignore` in each of the five component folders, then `cat .dockerignore` — *(extra)* one line, `secrets/`.
 - [ ] `docker build -t transcribe_audio .` (and the other four) — *(extra)* rebuild with the `.dockerignore` in place.
@@ -269,7 +269,7 @@ Commands in backticks are exactly as the README writes them (placeholders kept).
 - [ ] `docker run --rm -v "$(pwd):/app" transcribe_audio python cli.py -d` — *(extra)* meant to fail: `/usr/local/bin/python: /usr/local/bin/python: cannot execute binary file`, exit 126.
 - [ ] `docker run --rm -v "$(pwd):/app" transcribe_audio -c "source /home/app/.venv/bin/activate && python cli.py --help"` — *(extra)* the working form.
 
-*Clean up* (§4 Steps 25–26)
+*Clean up* (§4 Step 27)
 - [ ] `cd ..` — *(extra)* back to the repo root.
 - [ ] `docker image ls --filter reference=transcribe_audio --filter reference=generate_text --filter reference=synthesis_audio_en --filter reference=translate_text --filter reference=synthesis_audio` — *(extra)* the five images and their sizes.
 - [ ] `git status` — *(extra)* only `generate_text/` and your edited `cli.py` files show; the other four folders hide their Dockerfiles and project files. In your own repo, `git add -f` them; never stop ignoring `secrets/`.
