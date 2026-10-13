@@ -4,25 +4,25 @@
 
 ## 中文速览
 
-- **做什么：** 用 11 本 cheese 书（10 本 Project Gutenberg + Pavlos 写的 Tolminc 短篇故事）搭一个经典的两阶段 RAG。Indexing：chunk → embed（Vertex AI 上的 `gemini-embedding-001`，每个 chunk 256 维）→ load 进 ChromaDB；Query：embed 问题 → top-10 nearest chunks → 拼进 prompt → `gemini-3.1-flash-lite` 回答。全部是 `cli.py` 的 flag（`--chunk`、`--embed`、`--load`、`--query`、`--chat`），跑在 Docker Compose 起的两个 container 里。
+- **做什么：** 用 11 本 cheese 书（10 本 Project Gutenberg + Pavlos 写的 Tolminc 短篇故事）搭一个经典的两阶段 RAG。Indexing：chunk → embed（Vertex AI 上的 `gemini-embedding-001`，每个 chunk 一个 256 维 vector）→ load 进 ChromaDB；Query：embed 问题 → top-10 nearest chunks → 拼进 prompt → `gemini-3.1-flash-lite` 回答。每一步都是 `cli.py` 的一个 flag（`--chunk`、`--embed`、`--load`、`--query`、`--chat`），跑在 Docker Compose 起的两个 container 里。
 - **Idea 1 · RAG 不改 model：** retrieval 是你的代码做的，model 只看到 prompt 里贴进去的 chunks，weights 一点没变；删掉 collection，"知识"就没了。改 weights 的是 fine-tuning（L08）。
 - **Idea 2 · chunking 是 trade-off：** `char-split` 是 350 字符的窗口、overlap 20、`separator=''`，会在单词中间切（共 8,248 个 chunk）；`recursive-split` 按段落 → 行 → 词切，但悄悄继承了 library 默认的 `chunk_overlap=200`（README 没说），所以有 14,228 个 chunk，embed 的字符量多 1.4×。
 - **Idea 3 · embedding 是方向：** `gemini-embedding-001` 原生 3,072 维，代码用 `output_dimensionality` 只要前 256 维。collection 用 `{"hnsw:space": "cosine"}` 建（Chroma 默认是 L2），返回的是 cosine distance，越小越近。Index 和 query 必须用同一个 model、同一个 dimension，否则要么报 dimension error，要么悄悄返回垃圾。
 - **Idea 4 · filter 是 mask，不是 ranking：** `--query` 实际只跑 variant #4：`where={"book": "The Complete Book of Cheese"}` + `$contains "Italian"`，先过滤再排序，所以 10 个结果全是意大利 cheese，没有一个提到 Tolminc。这是在演示 filter，不是你做错了。`--chat` 才是不带 filter 的 top-10。
-- **Idea 5 · ops 的形状：** 一次性的 CLI container `llm-rag-cli`（`--rm`）+ 常驻的 `llm-rag-chromadb` server，在 Compose 建的 `llm-rag-network` 上，CLI 用 container name `llm-rag-chromadb:8000` 访问 DB；published 的 host port 8000 是给你的 browser 和 `curl` 用的。Chroma 的 `/data` bind-mount 到 `docker-volumes/chromadb/`，所以 restart 之后 index 还在；service account key 从 `../secrets` mount 到 `/secrets`，永远不放进 repo。
-- **最费时间的坑：** ① clone 出来的 folder 必须叫 `llm-rag`，`secrets/` 必须是它的 sibling（`docker-compose.yml:11-12` 写死了 `../secrets` 和 `../llm-rag`），否则 container 一启动就报 `/bin/bash: docker-entrypoint.sh: No such file or directory`。② 忘了改 `docker-shell.sh:7` 的 `GCP_PROJECT`，或者没 enable Vertex AI API（README 根本没写这一步），`--embed` 时就是 403 `PERMISSION_DENIED` / `SERVICE_DISABLED`。`--chunk` 不调 API，所以 key 放错位置要到 `--embed` 才报 `DefaultCredentialsError`。③ Compose 只在 image 不存在时才 build，`git pull` 改了 dependencies 之后要自己 `docker compose build`。
+- **Idea 5 · ops 的形状：** 一次性的 CLI container `llm-rag-cli`（`--rm`）+ 常驻的 `llm-rag-chromadb` server，都在 Compose 建的 `llm-rag-network` 上，CLI 用 container name `llm-rag-chromadb:8000` 访问 DB；published 的 host port 8000 是给你的 browser 和 `curl` 用的。Chroma 的 `/data` bind-mount 到 `docker-volumes/chromadb/`，所以 restart 之后 index 还在；service account key 从 `../secrets` mount 到 `/secrets`，永远不放进 repo。
+- **最费时间的两个坑：** ① folder 的名字和位置：clone 出来的 folder 必须叫 `llm-rag`，`secrets/` 必须是它的 sibling（`docker-compose.yml:11-12` 写死了 `../secrets` 和 `../llm-rag`），否则 container 一启动就报 `/bin/bash: docker-entrypoint.sh: No such file or directory`；key 放错位置则要到 `--embed` 才报 `DefaultCredentialsError`，因为 `--chunk` 不调 API。② 403：忘了改 `docker-shell.sh:7` 的 `GCP_PROJECT`（默认是 `ac215-project`），或者没 enable Vertex AI API（README 根本没写这一步），`--embed` 就会报 `PERMISSION_DENIED` / `SERVICE_DISABLED`。（另外：Compose 只在 image 不存在时才 build，`git pull` 改了 dependencies 之后要自己 `docker compose build`。）
 - **README 的 errata：** `SYSTEM_INSTRUCTION` 定义了但从来没传给 model（E1），所以 answer 的 grounding 比 README 说的弱；`out.txt` 是用旧版 Tolminc 书跑的 `--agent`（L06），别指望复现；`chromadb/chroma:latest` 没 pin（2026-10-12 是 1.5.9，client 是 1.1.0）；Storage Admin 这个 role 用不到。
 - **做完要删：** `exit` 只删掉 CLI container，`llm-rag-chromadb` 还在跑、还占着 port 8000，要在 `llm-rag/` 里 `docker compose down`。Cloud 上没有要删的东西（只有 pay-per-call 的 Vertex AI，整个 tutorial 做两遍也远低于 $2）。可选：删 `outputs/` 和 `docker-volumes/`（Linux 上要 `sudo`）；课程结束后在 IAM 里删掉 JSON key。
 
 ## At a glance
 
-**What you build.** A question-answering system over 11 cheese books: `cli.py` cuts the books into chunks, embeds each chunk into a 256-number vector with Vertex AI's `gemini-embedding-001`, and loads them into a ChromaDB collection; then it embeds a question, retrieves the 10 nearest chunks and pastes them under the question in a prompt for `gemini-3.1-flash-lite`. It is your first multi-container Compose app with a stateful service: a throw-away CLI container talks by name to a long-lived Chroma server container whose data lives in a bind-mounted folder on your laptop.
+**What you build.** A question-answering system over 11 cheese books: `cli.py` cuts the books into chunks, embeds each chunk into a 256-number vector with Vertex AI's `gemini-embedding-001`, loads them into a ChromaDB collection, and then answers a question by retrieving the 10 nearest chunks and pasting them under the question in a prompt for `gemini-3.1-flash-lite`. It is your first multi-container Compose app with a stateful service: a throw-away CLI container talks by name to a long-lived Chroma server container whose data lives in a bind-mounted folder on your laptop.
 
 **Time needed** (estimate). Service account and key: about 15 minutes. The first `sh docker-shell.sh` builds the image, which takes a few minutes. Chunking takes seconds and makes no API call; embedding takes roughly 1-3 minutes per chunk type (char-split includes 55 s of deliberate sleeps); load, query and chat take about a minute each. Budget about 1-1.5 hours for the README's core sections, plus 10-20+ minutes of API calls for the optional semantic split and about an hour for the extras and exercises.
 
 **Prerequisites.**
 - A GCP project with credits/billing from Tutorial 0 (`ac215-setup/README.md:149-193`), created under an individual account, "not under Harvard Organization" (`ac215-setup/README.md:157`). Have its **Project ID** at hand (not the project name).
-- Docker Desktop, or Docker Engine plus the Compose v2 plugin (the script calls `docker compose`); `git`. No local Python: everything runs in the container. Chrome for the optional web tools.
+- Docker Desktop, or Docker Engine plus the Compose v2 plugin (the script calls `docker compose`), and `git`. No local Python: everything runs in the container. Chrome for the optional web tools.
 - Background: service-account JSON keys and `GOOGLE_APPLICATION_CREDENTIALS` (L03); secrets outside the repo mounted at `/secrets`, Compose networks, DNS by container name and published ports (L04).
 - Credentials: a service account `llm-service-account` with the Vertex AI User role ("Gemini Enterprise Agent Platform User" in the README) and its JSON key at `../secrets/llm-service-account.json`.
 - APIs: the **Vertex AI API** (`aiplatform.googleapis.com`). The README never says to enable it (E6).
@@ -56,7 +56,7 @@
 - **Other branches, read for comparison only:** `pipenv` @ `0b671ede29d4b37ecd530da493485b015adad4da` (2025-03-04, last year's Pipenv version, used in §7); `demo-podcast` @ `96fef434536f6e58a5bd027f49916fc98cd467e1` (2026-10-07, API + React front end, material for a later lecture); `revert-1-demo-podcast` @ `b77a556560befb87e241d39965d68f2e77a6d2ad` (the revert PR's branch).
 - **Context repos read for §7:** `dlops-io/cheese-app-v0` @ `cb6fb94` (L10; it ships a near-verbatim copy of this repo in `cheese-app-v0/llm-rag/`, see §7), `dlops-io/llm-agent-google-adk` @ `f89faa79de744f6a046e30dff24b3b6f1d73720b` (L06), `dlops-io/ac215-setup` @ `61a7b9d` (Tutorial 0).
 - **Path convention:** paths without a prefix (`cli.py:23`, `README.md:84`) are inside `llm-rag/`. Course-site paths start with `2026-AC215/`, other repos with their repo name.
-- **Method.** Nothing from the repo was built or run, and no GCP access was used. Every `path:line` reference was verified against the repo on 2026-10-13.
+- **Method.** Nothing from the repo was built or run, and no GCP access was used. The facts and `path:line` references were verified against the repos on 2026-10-13 (adversarial check).
   - **Chunk counts** come from a separate script that calls the same `langchain-text-splitters 0.3.11` classes with the same arguments as `cli.py:184-205`, on the repo's book files, in a scratch venv.
   - **Library behaviour** comes from reading the source of `google-genai 1.39.1` and `chromadb 1.1.0`, the versions pinned in `uv.lock`.
   - **Docker Hub tags** for `chromadb/chroma` were looked up on 2026-10-12.
@@ -68,7 +68,7 @@
 
 ## Command checklist
 
-Commands in backticks are exactly as the README writes them (placeholders kept). Plain items are console clicks or edits. Items marked *(extra)* are not in the README; they come from §4 of this guide. Every `python cli.py …` command runs **inside** the CLI container that `sh docker-shell.sh` opens (prompt in `/app`); `docker`, `curl`, `ls` and `wc` items marked "host" run in a second terminal on your laptop.
+Commands in backticks are exactly as the README writes them (placeholders kept). Plain items are console clicks or edits. Items marked *(extra)* are not in the README; they come from §4 and §6 of this guide. Every `python cli.py …` command runs **inside** the CLI container that `sh docker-shell.sh` opens (prompt in `/app`); items marked "host" run in a second terminal on your laptop.
 
 ### Prerequisites
 
@@ -85,21 +85,21 @@ Commands in backticks are exactly as the README writes them (placeholders kept).
 *(`README.md:52-69`; §4 Step 1)*
 - [ ] *(extra)* Enable the **Vertex AI API** in your project (APIs & Services). The README never says to (E6); without it the first embed fails with `SERVICE_DISABLED` (G4).
 - [ ] `gcloud services enable aiplatform.googleapis.com --project=<YOUR_PROJECT_ID>` — *(extra)* the CLI equivalent of the click above.
-- [ ] Go to the [GCP Console](https://console.cloud.google.com/home/dashboard), search for **"Service accounts"** in the top search box, or open **IAM & Admin → Service accounts**.
+- [ ] Go to the [GCP Console](https://console.cloud.google.com/home/dashboard), search for **"Service accounts"** in the top search box, or open **IAM & Admin → Service accounts** from the top-left menu.
 - [ ] Create a new service account called `llm-service-account`.
 - [ ] In **"Grant this service account access to project"** select **Storage Admin** and **Gemini Enterprise Agent Platform User** (listed as "Vertex AI User" in older projects). Only the Vertex role is used by the code; Storage Admin is unused (E5).
 - [ ] Click the service account and open the **KEYS** tab.
 - [ ] Click **ADD Key (Create New Key)** and select **JSON**; a private key JSON file downloads to your computer. If key creation is blocked by an org policy, you are in an organisation-managed project: use your personal one.
 - [ ] Copy the JSON file into the **secrets** folder and rename it to `llm-service-account.json`.
 - [ ] `ls ../secrets` — *(extra)* from inside `llm-rag/`: prints `llm-service-account.json`.
-- [ ] `grep project_id ../secrets/llm-service-account.json` — *(extra)* the project the key belongs to; the next section must use the same ID.
+- [ ] `grep project_id ../secrets/llm-service-account.json` — *(extra)* shows the project the key belongs to; the next section must use the same ID.
 
 ### Run LLM RAG Container
 
 *(`README.md:75-85`; §4 Steps 2-3)*
 - [ ] Make sure you are inside the `llm-rag` folder and open a terminal at this location.
-- [ ] Update `GCP_PROJECT` to your own project ID in `docker-shell.sh`: line 7, `export GCP_PROJECT="ac215-project" # CHANGE TO YOUR PROJECT ID`. Leave line 8 (`/secrets/llm-service-account.json`, an in-container path) alone. Skipping this gives 403 `PERMISSION_DENIED` later (G3).
-- [ ] `sh docker-shell.sh` — exports the two env vars and runs `docker compose run --rm llm-rag-cli`: Compose creates `llm-rag-network`, builds `llm-rag-cli` on the first run only (a few minutes), starts `llm-rag-chromadb` on port 8000, and drops you into bash in `/app` as user `app` after the `Container is running!!!` banner.
+- [ ] Update `GCP_PROJECT` to your own project ID in `docker-shell.sh`: line 7, `export GCP_PROJECT="ac215-project" # CHANGE TO YOUR PROJECT ID`. Leave line 8 (`/secrets/llm-service-account.json`, an in-container path) alone. Skipping this gives a 403 `PERMISSION_DENIED` later (G3).
+- [ ] `sh docker-shell.sh` — runs `docker compose run --rm llm-rag-cli`: creates `llm-rag-network`, builds `llm-rag-cli` on the first run only (a few minutes), starts `llm-rag-chromadb` on port 8000, then prints the `Container is running!!!` banner and a bash prompt in `/app` as user `app`.
 - [ ] `docker ps` — *(extra, host)* lists `llm-rag-chromadb` with `0.0.0.0:8000->8000/tcp` and a CLI container.
 - [ ] `curl http://localhost:8000/api/v2/heartbeat` — *(extra, host)* returns `{"nanosecond heartbeat": …}`.
 
@@ -114,7 +114,7 @@ Commands in backticks are exactly as the README writes them (placeholders kept).
 ### Generate Embeddings
 
 *(`README.md:122-138`; §4 Step 6)*
-- [ ] `python cli.py --embed --chunk_type char-split` — sends the chunks to `gemini-embedding-001` in batches of 100 (~89 calls, plus a 5 s sleep per book) and writes `outputs/embeddings-char-split-<book>.jsonl` with a 256-float `embedding` column. First command that needs the key.
+- [ ] `python cli.py --embed --chunk_type char-split` — sends the chunks to `gemini-embedding-001` in batches of 100 (~89 calls, plus a 5 s sleep per book) and writes `outputs/embeddings-char-split-<book>.jsonl` with a 256-float `embedding` column. The first command that needs the key.
 - [ ] `python cli.py --embed --chunk_type recursive-split` — the same for the recursive chunks (~148 calls).
 
 ### Load Embeddings into Vector Database
@@ -128,7 +128,7 @@ Commands in backticks are exactly as the README writes them (placeholders kept).
 ### Query the Vector Database
 
 *(`README.md:171-186`; §4 Steps 9 and 11)*
-- [ ] `python cli.py --query --chunk_type char-split` — embeds "How is tolminc cheese made?" and runs only filter variant #4: top 10 from *The Complete Book of Cheese* whose text contains "Italian". None of the results mentions Tolminc.
+- [ ] `python cli.py --query --chunk_type char-split` — embeds "How is tolminc cheese made?" and runs only filter variant #4: the top 10 from *The Complete Book of Cheese* whose text contains "Italian". None of the results mentions Tolminc.
 - [ ] `python cli.py --query --chunk_type recursive-split` — the same query against `recursive-split-collection`.
 - [ ] *(extra)* On your laptop, uncomment variant #1 in `cli.py:325-331` and comment out #4, then rerun `--query` (no rebuild needed: the repo is bind-mounted).
 - [ ] `python cli.py --get --chunk_type char-split` — *(extra)* undocumented flag: a plain metadata lookup (10 records from Bob Brown's book, no `distances`, no ranking) (Step 11).
@@ -161,8 +161,13 @@ Commands in backticks are exactly as the README writes them (placeholders kept).
 - [ ] `sudo rm -rf docker-volumes` — *(extra, host, Linux, optional)* removes the root-owned Chroma data; delete `outputs/` too if you want the disk back (G14).
 - [ ] *(extra)* When the course ends, delete the key under **IAM & Admin → Service accounts → KEYS**.
 
-*Only when needed*
-- [ ] `docker compose build` — *(extra)* after a `git pull` that changed `pyproject.toml`, `uv.lock` or the `Dockerfile`: Compose only builds when the image is missing (G9).
+*Only when needed (§6)*
+- [ ] `docker compose build` — *(extra, host)* after a `git pull` that changed `pyproject.toml`, `uv.lock` or the `Dockerfile`: Compose only builds when the image is missing (G9). One-step alternative: `docker compose run --build --rm llm-rag-cli`.
+- [ ] `ls /secrets` — *(extra, in the container)* check that the key is mounted when the first embed fails with `DefaultCredentialsError` (G2).
+- [ ] `docker stop <name>` — *(extra, host)* frees host port 8000 when `docker ps` shows another container holding it (G6).
+- [ ] `docker rm -f llm-rag-chromadb` — *(extra, host)* clears a `container name "/llm-rag-chromadb" is already in use` conflict (G7).
+- [ ] `mkdir outputs && chmod a+w outputs` — *(extra, host, Linux)* fixes `PermissionError … 'outputs'` when your host uid is not 1000 (G14).
+- [ ] `git config --global core.autocrlf input` — *(extra, Windows)* then re-clone, so the `.sh` files keep LF endings (G22).
 
 ---
 
@@ -952,7 +957,7 @@ Each entry: symptom → cause → fix.
   - Secrets moved *outside* the repo and were mounted at `/secrets` by a `docker-shell.sh`.
   - Each student used their own SA.
   - `port_toy` taught Docker networks, DNS by container name, and published versus internal ports with Compose.
-  - The L04 guide (§7) flags this repo as the first real consumer of those ideas (`docker-compose.yml:1-3`, `:20`; `cli.py:30-31`).
+  - The [L04 guide](L04-containers-2b-flexible-workflow-ports.md) (§7) flags this repo as the first real consumer of those ideas (`docker-compose.yml:1-3`, `:20`; `cli.py:30-31`).
 
 **What L05 adds.**
 1. A **stateful service container**: a database server with a persistent bind-mounted data directory, started as a Compose dependency next to a disposable CLI container. It is the first time two of your containers talk over HTTP.

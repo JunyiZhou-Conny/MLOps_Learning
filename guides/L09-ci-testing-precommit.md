@@ -4,15 +4,15 @@
 
 ## 中文速览
 
-- **做什么：** 这节课不写新 app。拿一个很小的 FastAPI service（`api.service:app`，唯一的计算 endpoint `/euclidean_distance/` 调 `api/utils.py` 里的 `power()`），给它加三层 test：unit、integration、system，全部在同一个 Docker image `cheese-app-api:local` 里跑。然后在 host 上装 pre-commit hook，每次 `git commit` 之前先跑 9 个 hook（trailing whitespace、end of file、YAML/JSON、>1000 KB 大文件、private key、merge marker、black 120、flake8 120），全过了 commit 才存在。Guest lecture（Rahul Dave）的 `babykev` 把同一个 gate 用在一个真实的 ML project 上：`uv` 锁环境，`just` 给每个 task 起名字，hook 只跑一条 `just check`。全程不用 GCP，不花钱。
+- **做什么：** 这节课不写新 app。拿一个很小的 FastAPI service（`api.service:app`，唯一做计算的 endpoint `/euclidean_distance/` 调 `api/utils.py` 里的 `power()`），给它加三层 test：unit、integration、system，全部在同一个 Docker image `cheese-app-api:local` 里跑。然后在 host 上装 pre-commit hook：每次 `git commit` 之前先跑 9 个 hook（trailing whitespace、end-of-file、YAML、JSON、>1000 KB 大文件、private key、merge marker、black 120、flake8 120），全部通过 commit 才会生成。Guest lecture（Rahul Dave）的 `babykev` 把同一个 gate 用在真实的 ML project 上：`uv.lock` 锁环境，`just` 给每个 task 起名字，项目自己的检查全收进一个 hook：`just check`。全程不用 GCP，不花钱。
 - **Idea 1 · testing pyramid 按"跑了什么"来分：** unit = 直接调 `power()`；integration = 用 FastAPI 的 `TestClient` in-process 调整个 app（routing、validation、handler、`power()`，没有 socket）；system = 真 HTTP 打 `localhost:9000` 上的 uvicorn。文件夹名字不决定 test 类型，这个 repo 自己就把 system test 叫成了 "Integration tests"。
 - **Idea 2 · skipped ≠ passed：** system tests 用 `skipif(not is_api_running())`，而且只在 import（collection）时探测一次 `/health`。server 没起来就是 `1 passed, 4 skipped`，整个 run 还是绿的，一定要看 `-ra` 的 summary。CI 先用 `curl -f` 卡住，server 不在就直接 fail。babykev 的做法是 marker：非 hermetic 的 test 默认 deselect（`-m 'not system'`），要跑就 `just test -m system`，必须 pass，不能 skip。
 - **Idea 3 · formatter vs linter：** black 负责改写 layout，flake8 只负责报告问题。black 删不掉 unused import（F401），也拆不开长字符串（E501），这些要人来改。两个 tool 的 line length 必须一致：hook 和 CI 都是 120，但 black 默认 88、flake8 默认 79，README 里好几条命令没传宽度，所以结果对不上。
-- **Idea 4 · git hook 是 commit 前的闸门：** `pre-commit install` 写出 `.git/hooks/pre-commit`。`.git/` 不在 repo 里，所以每个 clone 都要重新 install；`git commit --no-verify` 也能跳过，所以 CI（L21）要在 server 上再跑一遍。hook 改了文件（black、end-of-file-fixer）就算 Failed：`git diff` → `git add -u` → 再 commit。pre-commit 用的是它自己 pin 的 `rev`（black 24.1.1），不是你装的 black。
+- **Idea 4 · git hook 是 commit 前的闸门：** `pre-commit install` 写出 `.git/hooks/pre-commit`。`.git/hooks/` 不会被 commit，也不会跟着 clone 下来，所以每个 clone 都要重新 install（babykev 的 `just setup` 顺手装好）；`git commit --no-verify` 也能跳过它，所以 CI（L21）要在 server 上再跑一遍。hook 改了文件（black、end-of-file-fixer）就算 Failed：`git diff` → `git add -u` → 再 commit。pre-commit 用的是它自己 pin 的 `rev`（black 24.1.1），不是你装的 black。hook 和 `ci.yml` 都只认 repo root：别把 `cheese-app-ci-cd` 放进 `MLOps_Learning` 这种 monorepo 里，否则 black/flake8 根本不会跑（G12）。
 - **Idea 5 · coverage 不等于 correctness：** babykev 的 step-05 是 92 tests、94% coverage、全绿，`branch_mask` 却是错的（question 2 能 attend 到 question 1）。step-05a 用 hypothesis 写 property-based test 才抓到，还把 counter-example shrink 到 `shape = (1, [1, 1, 1])`。
 - **Idea 6 · 一个 environment，一条命令：** cheese 靠 Docker image 保证环境一致（code 是 `COPY` 进去的，测的就是要 ship 的那个 artifact）；babykev 靠 `uv.lock`（`UV_LOCKED=1`）加 `just check`，人、hook、agent 和以后的 CI 都跑同一个动词。dev 依赖放在 `[dependency-groups]`，不跟 runtime 混在一起。
-- **最费时间的坑：** ① code 和 tests 是 `COPY` 进 image 的，没有 volume mount：改了 `utils.py` 或 test 不 rebuild（`docker build -t cheese-app-api:local .`）就什么都不变（G1）。② fresh clone 上 `black --check --line-length 120 api/` 直接 fail：`utils.py` 是故意留脏的（G23），不是你 Part 7 的 `/add/` 代码有问题。③ README:442 的 auto-format 命令把 `src/api-service` mount 到 `/app`，盖掉了 `docker-entrypoint.sh`，必报 `No such file or directory`（G2）。④ 把 `cheese-app-ci-cd` 放进你自己的 monorepo（比如 `MLOps_Learning`），hook 和 `ci.yml` 都只认 repo root，black/flake8 根本不跑（G12）。
-- **README 的几个 errata：** `/euclidean_distance/` 返回的是 JSON object，不是 `5.0`；"What Gets Checked?" 只列了 5 个 hook，config 里其实有 9 个；Part 6 的 `def broken(): assert False` 不会让任何 test 变红（只有 `test_*` 会被 collect）；Option 3 说"另开一个 terminal 起 server"，会和 `docker-shell.sh` 抢 9000 端口。
+- **最费时间的坑：** ① code 和 tests 是 `COPY` 进 image 的，没有 volume mount：改了 `utils.py` 或 test 不 rebuild（`docker build -t cheese-app-api:local .`）就什么都不变（G1）。② fresh clone 上 `black --check --line-length 120 api/` 直接 fail：`utils.py` 是故意留脏的（G23），不是你 Part 7 的 `/add/` 代码有问题。
+- **README 的几个 errata：** README:442 的 auto-format 命令把 `src/api-service` mount 到 `/app`，盖掉了 `docker-entrypoint.sh`，必报 `No such file or directory`（E1、G2）；`/euclidean_distance/` 返回的是 JSON object，不是 `5.0`；"What Gets Checked?" 只列了 5 个 hook，config 里其实有 9 个；Part 6 的 `def broken(): assert False` 不会让任何 test 变红（只有 `test_*` 会被 collect）；Option 3 说"另开一个 terminal 起 server"，会和 `docker-shell.sh` 抢 9000 端口。
 - **做完要删：** `docker stop api-server && docker rm api-server`，然后 `docker container ls`、`docker system prune`、`docker image ls`（`cheese-app-api:local`、`cheese-app-api-service` 这种有 tag 的 image 要自己 `docker image rm`）；`pre-commit uninstall` 加 `pre-commit clean`（删 `~/.cache/pre-commit/`）；babykev 的 `.venv`（CPU torch，几百 MB）、`~/.cache/huggingface` 里的 Qwen2.5-0.5B（约 1 GB）、step-05b 的 images（`just image stop` 再 `docker image rm`）。
 
 ## At a glance
@@ -116,7 +116,7 @@ Commands in backticks are exactly as the README (or, for the guest lecture, `wal
 - [ ] `pytest tests/unit/ --cov=api --cov-report=term-missing` — *(extra)* lists the missed lines in the terminal instead.
 - [ ] `uvicorn api.service:app --host 0.0.0.0 --port 9000 &` — *(extra)* starts the server in this same container. README:228's "another terminal" collides on port 9000 and can't be reached from here anyway (G4, E7).
 - [ ] `pytest tests/system/ -v` — *(extra)* now runs against that server.
-- [ ] `exit`
+- [ ] `exit` — *(extra)* leaves the container; `--rm` deletes it.
 
 ### Part 4: Automating with Pre-commit Hooks
 
@@ -126,12 +126,13 @@ Commands in backticks are exactly as the README (or, for the guest lecture, `wal
 *Install the Hooks* (README:243-249)
 - [ ] `pre-commit install` — from the repo root; expect `pre-commit installed at .git/hooks/pre-commit`.
 
-*Run the Hooks* (README:251-266; the manual run is done first here, §4 A9)
+*Run the Hooks* (README:251-266)
+- [ ] `git commit -m "Your commit message"` — git runs the hook before it creates the commit; the commit is created only if every hook passes and none modified a file. On a fresh clone nothing is staged yet, so there is nothing to commit: the commit is repeated below, after the manual run (§4 A9-A10).
 - [ ] `pre-commit run --all-files` — the first run downloads `pre-commit-hooks` v4.5.0, black 24.1.1 and flake8 7.0.0 into `~/.cache/pre-commit` (needs internet). Expect `Format Python code with Black … Failed`, `- files were modified by this hook`, `reformatted src/api-service/api/utils.py`; flake8 then passes; `Check JSON syntax` shows `(no files to check)Skipped`.
 - [ ] `git diff` — *(extra)* `def power(base, exponent):` and one blank line removed.
 - [ ] `pre-commit run` — staged files only; with nothing staged, every hook prints `(no files to check)Skipped`.
 - [ ] `git add -u` — *(extra)* stages black's fix; a commit needs something staged.
-- [ ] `git commit -m "Your commit message"` — git runs the hook first; the commit is created only if every hook passes and nothing was modified.
+- [ ] `git commit -m "Your commit message"` — *(extra: the README commit again)* the hooks now run on the staged `utils.py`, which black already fixed, so the commit is created. It stays local (§2).
 - [ ] *(extra)* Add `import os` back at the top of `service.py`, stage it and commit: flake8 blocks it with `F401 'os' imported but unused`, which black can't fix. Remove the line again.
 
 *(Parts 5 and 6, GitHub Actions and branch protection, belong to L21.)*
@@ -162,6 +163,7 @@ Commands in backticks are exactly as the README (or, for the guest lecture, `wal
 - [ ] `python3 -m black --check src/api-service/api/` and `python3 -m black src/api-service/api/` — (README:503-504) at 88; pass `--line-length 120` to match the hook (G9).
 - [ ] `PYTHONPATH=src/api-service pytest tests/unit/ -v` — (README:512) on the host; needs `pytest` installed (G7).
 - [ ] `PYTHONPATH=src/api-service pytest tests/integration/ -v` — (README:513) also needs `fastapi`, `httpx` and `pytest-asyncio` (G8).
+- [ ] `python3 -m black src/api-service/api/` and `python3 -m black --check --diff src/api-service/api/` — (README:528, 531, Troubleshooting "Black formatting conflicts") also at black's default 88 (E5); add `--line-length 120`.
 - [ ] `pytest tests/ -v`, `pytest tests/ -vv --tb=long`, `pytest tests/integration/test_api.py -v` — (README:537-543) on the host these fail with `No module named 'api'` without `PYTHONPATH=src/api-service` (E6, G7).
 - [ ] `docker build -t cheese-app-test . --no-cache` — (README:548) builds a third image name; it does not update `cheese-app-api:local` (E15).
 - [ ] `docker ps` and `docker logs <container-name>` — (README:554, 557) is the server up, and what did it log?
@@ -296,8 +298,10 @@ Commands in backticks are exactly as the README (or, for the guest lecture, `wal
 - [ ] `just test -m system` — (814) loads the real model (about 1 GB the first time).
 - [ ] `just image shell --network none` — (818) a dev container with no network.
 - [ ] `just check` — (822) inside it: green.
+- [ ] `just test -m system` — (826) passes too, but only because the model is in the mounted cache.
 - [ ] `HF_HOME=/tmp/empty just test -m system` — (830) fails: it can't reach the Hub.
-- [ ] `just image stop` — then `docker image rm` the babykev images when you are done.
+- [ ] `exit` — (831)
+- [ ] `just image stop` — (the walk runs it at 772) removes a dev container started with `just image start`; then `docker image rm` the babykev images when you are done.
 
 ---
 

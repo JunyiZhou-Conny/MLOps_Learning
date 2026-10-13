@@ -108,7 +108,7 @@ Commands in backticks are exactly as the README (or the file named next to them)
 `README.md:16-17` lets you skip to "View the App" if your L22 cluster is still running; read §6 #6 first, because v4's config switches the load balancer type.
 
 *Run `deployment` container* (README.md:76-79)
-- [ ] `cd src/deployment` — "cd into `deployment`".
+- [ ] `cd src/deployment` — the README's "cd into `deployment`", from the repo root.
 - [ ] Go into `docker-shell.sh` and change `GCP_PROJECT` to your project id.
 - [ ] `sh docker-shell.sh` — builds `cheese-app-deployment` for `linux/amd64`, logs gcloud and Pulumi in, and leaves you at a bash prompt in `/app`.
 
@@ -127,7 +127,7 @@ Commands in backticks are exactly as the README (or the file named next to them)
 - [ ] `kubectl logs job/vector-db-loader -n cheese-app-namespace` — *(extra)* if the `vector-db-loader` Job does not finish.
 
 *View the App (If you have a domain)* (README.md:105-123)
-- [ ] Get your ingress IP: "Copy the `nginx_ingress_ip` value". v4 has no such output; copy `ip_address` instead (§9 erratum 4).
+- [ ] Get your ingress IP: "Copy the `nginx_ingress_ip` value" from the terminal, or from GCP console → Kubernetes → Gateways, Services & Ingress → INGRESS. v4 has no such output; copy `ip_address` instead (§9 erratum 4).
 - [ ] `pulumi config set deploy-k8s:domain <your-domain>` — *(extra)* inside the container in `deploy_k8s`; then commit the changed `Pulumi.dev.yaml` and re-run `pulumi up` so the Ingress and the managed certificate use your domain (§4 B4).
 - [ ] At your domain provider, add an 'A Record': Host/Name `@`, Points to/Value: the IP, TTL 3600 (or default).
 - [ ] Wait for DNS propagation (can take 5-30 minutes).

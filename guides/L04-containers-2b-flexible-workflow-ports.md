@@ -91,7 +91,7 @@
 
 ## Command checklist
 
-Commands in backticks are exactly as the READMEs write them (placeholders kept); multi-line commands are joined onto one line, without the `\` continuations. Plain items are console clicks or edits. Items marked *(extra)* are not in the README; they come from §2, §4 and §6 of this guide. The root README uses the long CLI flags (`--download`, `--upload`, …); the component READMEs use the short forms (`-d`, `-t`, `-g`, `-s`, `-u`). The mega-pipeline groups follow §4's order (cloud prerequisites before `cli.py`), which differs slightly from the README's order; no README step is dropped.
+Commands in backticks are exactly as the READMEs write them (placeholders kept); multi-line commands are joined onto one line, without the `\` continuations. Plain items are console clicks or edits. Items marked *(extra)* are not in the README; they come from §2, §4 and §6 of this guide. The root README uses the long CLI flags (`--download`, `--upload`, …); the component READMEs use the short forms (`-d`, `-t`, `-g`, `-s`, `-u`). The mega-pipeline groups follow §4's order (cloud prerequisites before `cli.py`; the three non-default `docker-shell.sh` modes after Task E), which differs slightly from the README's order; no README step is dropped.
 
 ### Mega-pipeline · Get the Code
 
@@ -140,14 +140,17 @@ Commands in backticks are exactly as the READMEs write them (placeholders kept);
 
 *(`README.md:207-240`; `transcribe_audio/README.md:13-120`; §4 A7)*
 - [ ] `cd transcribe_audio` — run every `docker-shell.sh` from inside its component folder.
-- [ ] `chmod +x docker-shell.sh` — only if the shell says `Permission denied`; normally unnecessary (E12).
+- [ ] Read the four shipped files (`Dockerfile`, `docker-shell.sh`, `pyproject.toml`, `uv.lock`) before you run anything (`transcribe_audio/README.md:17-26`; §5 excerpts 1-4).
 - [ ] `./docker-shell.sh` — build the image locally and run it (default). Prints `Docker Username: dlops, Build Mode: dev-run`, builds `mega-pipeline-transcribe-audio` and drops you at `app@<container-id>:/app$`.
+- [ ] `chmod +x docker-shell.sh` — only if the previous command said `Permission denied` (then run it again); normally unnecessary (E12).
 - [ ] Windows Git BASH: prefix the command with `winpty` if you see "the input device is not a TTY" (`README.md:226`, `:380`).
 - [ ] `MSYS_NO_PATHCONV=1 ./docker-shell.sh` — *(extra)* Windows Git BASH, if it mangles `/secrets` or the `-v` specs (G18); combine with `winpty` if needed.
 
 *Inside the container*
 - [ ] `python --version` · `which python` · `echo $GOOGLE_APPLICATION_CREDENTIALS` — *(extra)* Python 3.14.x, `/home/app/.venv/bin/python`, `/secrets/mega-pipeline.json` (*expected*).
 - [ ] `ls -l /secrets` — *(extra)* should list `mega-pipeline.json` (G3).
+- [ ] `uv add <package>` — only when the component needs a new dependency: updates `pyproject.toml` and `uv.lock` on your host through the mount; commit both, then rebuild with `./docker-shell.sh dev` so the package is baked into the image (`transcribe_audio/README.md:89`; C3). The same note is in every component README.
+- [ ] `python cli.py --help` — lists `-d/--download`, `-t/--transcribe`, `-u/--upload` (`transcribe_audio/README.md:97-108`); stops with `AssertionError: Update group name` until `group_name` is set (G2).
 - [ ] `python cli.py --download` — wipes local `input_audios/` and pulls every object under `input_audios/` from your bucket.
 - [ ] `python cli.py --transcribe` — mp3 → FLAC with ffmpeg, then Speech-to-Text; writes `text_prompts/<group>/<name>.txt`.
 - [ ] `python cli.py --upload` — pushes `text_prompts/<group>/input-*.txt`; check `text_prompts/<group_name>/` in the console.
@@ -158,6 +161,7 @@ Commands in backticks are exactly as the READMEs write them (placeholders kept);
 *(`README.md:242-248`; `generate_text/README.md:62-136`; §4 A8)*
 - [ ] `cd ../generate_text` — *(extra)* the next component folder ("you'll `cd` into each one", `README.md:52`).
 - [ ] `./docker-shell.sh`
+- [ ] `python cli.py --help` — lists `-d/--download`, `-g/--generate`, `-u/--upload` (`generate_text/README.md:113-124`).
 - [ ] `python cli.py --download` — downloads `text_prompts/<group>/input-*.txt`.
 - [ ] `python cli.py --generate` — calls Gemini on Vertex AI (default `gemini-2.5-flash-lite`); prints a long "Generated text:".
 - [ ] `export GEMINI_MODEL=gemini-2.5-flash` — optional model switch (`generate_text/README.md:91-94`), also the fix for a 404 model-not-found; then:
@@ -170,6 +174,7 @@ Commands in backticks are exactly as the READMEs write them (placeholders kept);
 *(`README.md:250-257`; `synthesis_audio_en/README.md:110-121`; §4 A9)*
 - [ ] `cd ../synthesis_audio_en` — *(extra)*
 - [ ] `./docker-shell.sh`
+- [ ] `python cli.py --help` — lists `-d/--download`, `-s/--synthesis` (`synthesis_audio_en/README.md:98-108`).
 - [ ] `python cli.py --download` — downloads the generated paragraphs.
 - [ ] `python cli.py --synthesis` — long-audio Text-to-Speech (`en-US-Standard-B`) writes `text_audios/<group>/input-*.mp3` straight into the bucket; there is no `--upload` step.
 - [ ] `exit` — *(extra)*
@@ -179,6 +184,7 @@ Commands in backticks are exactly as the READMEs write them (placeholders kept);
 *(`README.md:259-265`; `translate_text/README.md:126-136`; §4 A10)*
 - [ ] `cd ../translate_text` — *(extra)*
 - [ ] `./docker-shell.sh`
+- [ ] `python cli.py --help` — lists `-d/--download`, `-t/--translate`, `-u/--upload`; the description still says "Translate English to French" (`translate_text/README.md:113-124`, E3).
 - [ ] `python cli.py --download` — downloads the generated paragraphs.
 - [ ] `python cli.py --translate` — Cloud Translation v2; the text is Spanish unless you changed `target_language` (E3).
 - [ ] `python cli.py --upload` — pushes to `text_translated/<group>/`.
@@ -189,6 +195,7 @@ Commands in backticks are exactly as the READMEs write them (placeholders kept);
 *(`README.md:267-274`; `synthesis_audio/README.md:110-135`; §4 A11)*
 - [ ] `cd ../synthesis_audio` — *(extra)*
 - [ ] `./docker-shell.sh`
+- [ ] `python cli.py --help` — lists `-d/--download`, `-s/--synthesis` (`synthesis_audio/README.md:98-108`).
 - [ ] `python cli.py --download` — downloads the translated text.
 - [ ] `python cli.py --synthesis` — Text-to-Speech with `fr-FR-Standard-C`; writes `output_audios/<group>/input-*.mp3`, the final output of the pipeline.
 - [ ] Optional ElevenLabs bonus (`synthesis_audio/README.md:125-135`): create an ElevenLabs API key and put a file `11lab_api_key.txt` containing `XI_API_KEY=<API_KEY>` in your `secrets/` folder. Read E10 first: `cli_11.py` reads it from `secrets/` relative to `/app` and hard-codes the instructor's bucket.
@@ -265,7 +272,8 @@ Commands in backticks are exactly as the READMEs write them (placeholders kept);
 *(`port_toy/README.md:426-529`; §4 B15-B17)*
 - [ ] `docker compose up` — builds `port_toy-gateway` and `port_toy-processor`, creates `toynet`, starts the processor then the gateway, and streams both logs; http://localhost:8090 works.
 - [ ] `docker network ls` — *(Handy commands)* in another terminal: lists `toynet`.
-- [ ] Edit a file, e.g. `gateway/index.html` (live through the bind mount, re-read on every page load).
+- [ ] `docker compose exec gateway curl ...` — the Compose form of `docker exec gateway curl ...` from the "Compare the commands" table (`port_toy/README.md:478-484`), e.g. with `http://processor:9200/health`; that table also maps `docker ps` → `docker compose ps` and `rm -f` + `network rm` → `docker compose down`.
+- [ ] Repeat a port experiment in `docker-compose.yml` (`port_toy/README.md:487`), e.g. change the host port under `ports:`; or edit `gateway/index.html`, which is live through the bind mount and re-read on every page load.
 - [ ] `docker compose up -d` — re-applies in the background, recreating only the services whose configuration changed.
 - [ ] `docker compose up -d --build` — rebuilds the images first; needed after editing `processor.py`.
 - [ ] `docker compose restart gateway` — *(extra)* needed after editing `gateway.py`.
@@ -533,7 +541,7 @@ The last two names are what Compose v2 calls images it builds without an `image:
 
 ## 4. Step-by-step walkthrough
 
-Each step gives the action, what happens under the hood, a checkpoint and what to do if it fails. Lines marked *expected* are inferred from the code; nothing was run (see the sources box at the top).
+Each step gives the action, what happens under the hood, a checkpoint and what to do if it fails. Lines marked *expected* are inferred from the code; nothing was built or run with Docker (see the sources box at the top).
 
 ### Part A — mega-pipeline, `flexible-workflow`
 

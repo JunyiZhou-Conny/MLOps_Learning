@@ -10,8 +10,8 @@
 - **Idea 3 · `needs` 画出一个 DAG：** `build` fan-out 到 4 个 job；`test-summary` 用 `needs: [unit-tests, integration-tests, system-tests]` fan-in，加上 `if: always()` 才能在上游 fail 时照样跑、读 `needs.<job>.result`。`lint-and-format` 不在 `needs` 里，所以 Black fail 了，summary 和 Slack 还是说 "All tests passed"。
 - **Idea 4 · CI 只认 exit code：** Black 是 blocking（`continue-on-error: false`），Flake8 是 advisory（`continue-on-error: true`）。Black fail 之后 Flake8 这个 step 直接 skipped，你看不到它的 output。system test 有 `skipif`，server 没起来就是 "1 passed, 4 skipped"，job 还是绿的，所以 CI 先用 `curl -f … || exit 1` 卡住。
 - **Idea 5 · secret：** `SLACK_WEBHOOK_URL` 在 Settings → Secrets and variables → Actions 里加，log 里显示成 `***`，fork 来的 PR 拿不到。`if:` 里不能直接读 `secrets`，所以 repo 先用一个 step 在 shell 里判断，再把 `enabled=true/false` 写进 `$GITHUB_OUTPUT`。
-- **最费时间的坑：** ① 第一次 run 一定是红的：`src/api-service/api/utils.py:7`（`def power(base,exponent):`）加上三个空行让 Black fail；README 里全绿的截图 `assets/pipline.png` 来自另一个 code state。`pre-commit run --all-files` 修好、commit、push，六个 job 就全绿。② workflow 必须在 repo **root** 的 `.github/workflows/`：放在 monorepo（比如 `MLOps_Learning`）的子文件夹里永远不会跑；只 push feature branch 也不会跑；fork 要先在 Actions tab 里 enable workflows。③ Part 6 选 required check 要按 job 的 `name:`（"Unit Tests"），不是 job ID（`unit-tests`）；README 的 `def broken(): assert False` 根本不会被 pytest collect，要写 `def test_broken(): assert False`。
-- **已知 bug：** tests fail 的时候 Slack 永远不会发 "❌ CI Pipeline Failed"：`slack-check` 这个 step 没有 `if: always()`，被 skip 了（§6 G8）。
+- **最费时间的坑：** ① 第一次 run 一定是红的：`src/api-service/api/utils.py:7`（`def power(base,exponent):`）加上三个空行让 Black fail；README 里全绿的截图 `assets/pipline.png` 来自另一个 code state。`pre-commit run --all-files` 修好、commit、push，六个 job 就全绿。② push 了却没有 run：workflow 必须在 repo **root** 的 `.github/workflows/`，放在 monorepo（比如 `MLOps_Learning`）的子文件夹里永远不会跑；只 push feature branch 也不会跑；fork 要先在 Actions tab 里 enable workflows。
+- **README 和 code 里的 errata：** Part 6 选 required check 要按 job 的 `name:`（"Unit Tests"），不是 job ID（`unit-tests`）；README 的 `def broken(): assert False` 根本不会被 pytest collect，要写 `def test_broken(): assert False`。还有一个已知 bug：tests fail 的时候 Slack 永远不会发 "❌ CI Pipeline Failed"，因为 `slack-check` 这个 step 没有 `if: always()`，被 skip 了（§6 G8）。
 - **做完要删：** 本地 `docker stop api-server && docker rm api-server`、`docker system prune`；private repo 上把 workflow Disable（Actions → "CI Pipeline" → "⋯" → Disable workflow），在 run 页面删掉旧的 artifact（`docker-image` 一天后自己过期）。没有任何 GCP 资源要删。
 
 ## At a glance
@@ -57,7 +57,8 @@ Commands in backticks are exactly as the README writes them (placeholders kept).
 
 ### Before the README *(extra)*
 
-*Put the repo somewhere Actions can run it* (§4 Step 0; the README only says "Clone or download from your repository", README.md:19-20)
+Put the repo somewhere Actions can run it (§4 Step 0). The README only says "Clone or download from your repository" (README.md:19-20), but Actions runs only in a GitHub repo you can push to, and only from `.github/workflows/` at that repo's root. If you use this workspace's `tools/sync_tutorials.py`, the clone is in `tutorials/cheese-app-ci-cd`: its own git repo (gitignored here, so no embedded-repo problem), but its `origin` is `dlops-io`, so you still need Route B's `git remote set-url` step before you can push (and, if you synced with `--pinned`, `git switch main` first, so your fix commits land on `main` rather than on a detached HEAD).
+
 *Route A: fork*
 - [ ] Fork `dlops-io/cheese-app-ci-cd` on GitHub, open your fork's **Actions** tab and click the button that enables workflows (Actions is disabled on forks until you do).
 - [ ] `git clone https://github.com/<you>/cheese-app-ci-cd.git` — *(extra)* clone your fork as its own repo, not inside another git repo (§6 G2, G3).
@@ -65,7 +66,8 @@ Commands in backticks are exactly as the README writes them (placeholders kept).
 *Route B: your own empty repo*
 - [ ] Create an empty repo such as `<you>/cheese-app-ci-cd` on GitHub.
 - [ ] `git clone https://github.com/dlops-io/cheese-app-ci-cd.git` — *(extra)* the course repo, as its own clone.
-- [ ] `git remote set-url origin https://github.com/<you>/cheese-app-ci-cd.git` and `git push -u origin main` — *(extra)* point `origin` at your repo and push `main`; this push to `main` already starts a run.
+- [ ] `git remote set-url origin https://github.com/<you>/cheese-app-ci-cd.git` — *(extra)* point `origin` at your repo.
+- [ ] `git push -u origin main` — *(extra)* push `main`; this push to `main` already starts a run.
 
 *Either route*
 - [ ] `git log -1 --format='%H %ci'` — *(extra)* expect `b8458ff0cc1898700b32a873b4665f43f50df71e 2025-11-13 13:59:04 -0500`.
@@ -121,10 +123,10 @@ Commands in backticks are exactly as the README writes them (placeholders kept).
 
 *(README.md:232-273)*
 - [ ] `pip install pre-commit` — outside the container.
-- [ ] `pre-commit install` — from the repo root.
-- [ ] `pre-commit run --all-files` — the Black hook reports *Failed* ("files were modified by this hook") and rewrites `src/api-service/api/utils.py`; a second run passes.
+- [ ] `pre-commit install` — from the repo root; installs the Git hook.
+- [ ] `git commit -m "Your commit message"` — from now on the hooks run automatically on every commit.
+- [ ] `pre-commit run --all-files` — manual run on all files: the Black hook reports *Failed* ("files were modified by this hook") and rewrites `src/api-service/api/utils.py`; a second run passes.
 - [ ] `git checkout -- src/api-service/api/utils.py` (or `git stash`) — *(extra)* undo that rewrite if you want to watch CI catch the problem first (§4 Steps 7 and 13).
-- [ ] `git commit -m "Your commit message"` — the hooks run automatically on every commit.
 - [ ] `pre-commit run` — manual run on staged files only.
 
 ### Part 5: GitHub Actions (Remote CI)
@@ -203,7 +205,7 @@ Commands in backticks are exactly as the README writes them (placeholders kept).
 - [ ] `docker image ls`
 - [ ] *(extra)* Private repo: Actions → "CI Pipeline" → "⋯" → *Disable workflow*, and delete old artifacts on each run page.
 
-*The README's Quick Command Reference and Troubleshooting sections (README.md:457-566) repeat Parts 1-4 and 7; they are listed in the L09 guide.*
+*The README's Quick Command Reference and Troubleshooting sections (README.md:457-566) mostly repeat Parts 1-4 and 7, plus host-side variants such as `PYTHONPATH=src/api-service pytest tests/unit/ -v` (README.md:512); they are checklisted in the [L09 guide](L09-ci-testing-precommit.md#quick-command-reference-and-troubleshooting). Note §6 G11 and G18 before running them.*
 
 ---
 
