@@ -1413,3 +1413,339 @@ Same recipe, two surprises.
 - **Checkpoint:** no containers are left (every run used `--rm`); in GCP there is nothing to delete.
 
 ---
+
+## 5. Code tour
+
+```
+mega-pipeline/  (main @ c6bbc9b)
+├── README.md                 overview, bucket prefixes, credentials, the five tasks, quick reference, sample Dockerfile
+├── .gitignore                ignores secrets/, .vscode, outputs and staff-only folders (/api-service, /deployment, /frontend …)
+├── mega-pipeline-flow.png    the six-step flow diagram (record → transcribe → generate → synth EN / translate → synth FR)
+├── mega-pipeline-bucket.png  a screenshot of the bucket's prefixes
+├── transcribe_audio/   A  README.md · cli.py (Speech-to-Text) · .gitignore (also ignores Dockerfile, pyproject.toml, uv.lock!) · secrets/.gitkeep
+├── generate_text/      B  README.md · cli.py (Gemini) · pyproject.toml (requires-python >=3.14!) · main.py (uv init leftover) · secrets/.gitkeep   [no .gitignore]
+├── synthesis_audio_en/ C  README.md · cli.py (Text-to-Speech Long Audio, en-US) · .gitignore · secrets/.gitkeep
+├── translate_text/     D  README.md · cli.py (Translation v2) · .gitignore · secrets/.gitkeep
+└── synthesis_audio/    E  README.md · cli.py (Text-to-Speech Long Audio, fr-FR) · cli_11.py (ElevenLabs bonus) · .gitignore · secrets/.gitkeep
+   + what YOU add in each folder: Dockerfile, pyproject.toml + uv.lock, secrets/mega-pipeline.json, (recommended) .dockerignore
+```
+
+**1. Your Dockerfile vs the appendix's sample** (`README.md:175-225`)
+
+Your 30-line file is in §4 Step 6. The appendix's version adds comments and three differences:
+```dockerfile
+# README.md:179
+ARG DEBIAN_PACKAGES="build-essential curl"
+# README.md:199-200
+RUN set -ex; \
+    for i in $(seq 1 8); do mkdir -p "/usr/share/man/man${i}"; done && \
+```
+- `"build-essential curl"`: no `ffmpeg`, so pasted into `transcribe_audio` it breaks `--transcribe` (§6 G8). For B–E, `curl` is simply unused.
+- `set -ex`: print each command and stop at the first failure.
+- The `mkdir … man${i}` loop recreates the man-page folders that slim images delete; some packages' install scripts (Java's is the classic case) fail without them. Without it, `ffmpeg`'s install only prints the harmless `update-alternatives: warning: skip creation of /usr/share/man/man1/…` lines (§4 Step 7).
+- Its comments explain the `ENV` block: "Tell uv to copy packages from the wheel into the site-packages" for `UV_LINK_MODE=copy` (`README.md:190-191`) and "This is done for the tutorial only" for `GOOGLE_APPLICATION_CREDENTIALS` (`README.md:194-195`). L04's Dockerfiles drop that `ENV` and pass the path at run time instead (`flexible-workflow:README.md:372`).
+
+**2. Stage A, download: listing a prefix**
+
+```python
+# transcribe_audio/cli.py:29-43
+def download():
+    print("download")
+
+    # Clear
+    shutil.rmtree(input_audios, ignore_errors=True, onerror=None)
+    makedirs()
+
+    client = storage.Client()
+    bucket = client.get_bucket(bucket_name)
+
+    blobs = bucket.list_blobs(prefix=input_audios+"/")
+    for blob in blobs:
+        print(blob.name)
+        if not blob.name.endswith("/"):
+            blob.download_to_filename(blob.name)
+```
+- `shutil.rmtree(input_audios, …)` starts clean, but only for the *inputs*: outputs in `text_prompts/` survive, which is what makes reruns skip finished work.
+- `storage.Client()` (line 36) is the first credentials lookup (ADC). No key path appears anywhere in the code; line 36 is where the captured `DefaultCredentialsError` traceback starts (§4 Step 11).
+- `client.get_bucket(...)` makes an API call (it needs `storage.buckets.get`). The uploads and the other stages use `storage_client.bucket(...)`, which only builds a local handle.
+- `list_blobs(prefix="input_audios/")`: Cloud Storage has no folders; this means "every object whose name starts with …". There is no group in this prefix: all teams transcribe the same audio.
+- `endswith("/")` skips the zero-byte placeholder object the console creates for a "folder".
+- `download_to_filename(blob.name)`: the local path mirrors the object name, and the bind mount puts it on your laptop.
+
+**3. Stage A, transcribe: ffmpeg, then a long-running Speech request**
+
+```python
+# transcribe_audio/cli.py:64-78
+        print("Transcribing:", audio_path)
+        with TemporaryDirectory() as audio_dir:
+            flac_path = os.path.join(audio_dir, "audio.flac")
+            stream = ffmpeg.input(audio_path)
+            stream = ffmpeg.output(stream, flac_path)
+            ffmpeg.run(stream)
+
+            with io.open(flac_path, "rb") as audio_file:
+                content = audio_file.read()
+
+            # Transcribe
+            audio = speech.RecognitionAudio(content=content)
+            config = speech.RecognitionConfig(language_code="en-US")
+            operation = client.long_running_recognize(config=config, audio=audio)
+            response = operation.result(timeout=90)
+```
+- `ffmpeg.input/output/run` (`ffmpeg-python`) only builds a command line and starts the **`ffmpeg` program** with `subprocess`. That is why `ffmpeg` must be in the Dockerfile's `ARG` (line 3), not only in `pyproject.toml`.
+- Why FLAC: Speech-to-Text v1 doesn't take MP3, and for FLAC the encoding and sample rate come from the file's header, so `RecognitionConfig` needs only `language_code`.
+- `RecognitionAudio(content=…)`: the bytes travel **inline** in the request (the alternative is a `uri="gs://…"`).
+- `long_running_recognize(...)` returns an operation handle at once; `.result(timeout=90)` blocks, polling, for up to 90 s.
+- Lines 80–96 (not shown) start from `text = "None"`, then concatenate `result.alternatives[0].transcript` for **every** result with `"".join` (line 90; the `c6bbc9b` fix: the API splits long audio at pauses, and the old code kept only the first piece, still visible as comments at lines 81–83), and write the `.txt`. If the API returns no results, the file says `None` (§6 G20).
+
+**4. Stage A, upload: the hand-off contract**
+
+```python
+# transcribe_audio/cli.py:104-115
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(bucket_name)
+
+    # Get the list of text file
+    text_files = glob.glob(os.path.join(text_prompts, group_name, "input-*.txt"))
+
+    for text_file in text_files:
+        filename = os.path.basename(text_file)
+        destination_blob_name = os.path.join(text_prompts, group_name, filename)
+        blob = bucket.blob(destination_blob_name)
+        print("Uploading:",destination_blob_name, text_file)
+        blob.upload_from_filename(text_file)
+```
+- The glob `input-*.txt` is half of the contract; B downloads with the matching `match_glob=f"{text_prompts}/{group_name}/input-*.txt"` (`generate_text/cli.py:42`). A file not named `input-…` is never handed on (§8 D2).
+- `os.path.join(text_prompts, group_name, filename)` is the object name, with the group as the namespace. `upload_from_filename` overwrites any existing object of that name: a wrong `group_name` can clobber another team's work.
+
+**5. Stage B: one LLM call**
+
+```python
+# generate_text/cli.py:64-78
+        # Generate output
+        input_prompt = f"""
+            Create a transcript for the podcast about cheese with 1000 or more words.
+            Use the below text as a starting point for the cheese podcast.
+            Output the transcript as paragraphs and not with who is talking or any "Sound" or any other extra information.
+            Do not highlight or make words bold.
+            The host's name is Pavlos Protopapas.
+            {input_text}
+        """
+        model_name = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash-lite")
+        print(input_prompt,"\n\n\n")
+        response = client.models.generate_content(
+            model=model_name, contents=input_prompt
+        )
+        paragraph = response.text
+```
+- The prompt is a plain f-string with the rough transcript appended. The instructions push for text a TTS voice can read: no speaker labels, no "Sound" cues, no bold.
+- `os.environ.get("GEMINI_MODEL", …)` is the one runtime knob: `-e GEMINI_MODEL=…` on `docker run` changes the model without editing code. Needed after 2026-10-20, when Vertex AI retires the default (§4 Step 18).
+- `client` was created at import as `genai.Client(vertexai=True, project=gcp_project, location='us-central1')` (`generate_text/cli.py:23-25`): Gemini **on Vertex AI**, billed to the course's project and authenticated with the same key. It loads credentials only on its first request, so a missing key shows up at `--generate`, not at `--help`.
+- `response.text` is the text of the first candidate.
+
+**6. Stages C and E: the TTS service writes straight to the bucket**
+
+```python
+# synthesis_audio_en/cli.py:77-91
+            parent = f"projects/{gcp_project}/locations/us-central1"
+            output_gcs_uri = f"gs://{bucket_name}/{audio_blob_name}"
+
+            request = texttospeech.SynthesizeLongAudioRequest(
+                parent=parent,
+                input=input,
+                audio_config=audio_config,
+                voice=voice,
+                output_gcs_uri=output_gcs_uri,
+            )
+
+            operation = client.synthesize_long_audio(request=request)
+            # Set a deadline for your LRO to finish. 300 seconds is reasonable, but can be adjusted depending on the length of the input.
+            result = operation.result(timeout=300)
+            print("Audio file will be saved to GCS bucket automatically.")
+```
+- `parent`: the Long Audio API is a project- and region-scoped resource (`us-central1`).
+- `output_gcs_uri`: the destination object; the service writes it, never your container. Hence no `--upload` in C and E.
+- Just above (`:63-69`), `blob.exists()` checks the bucket first: that GCS check, not the local `os.path.exists` at `:57`, is the real "already done" test. To regenerate, delete the object in the bucket (§8 D1).
+- `synthesis_audio/cli.py:76-90` is the same block, with voice `fr-FR-Standard-C` (`:47-48`) and the prefix `output_audios`.
+
+**7. Stage D: Translation v2**
+
+```python
+# translate_text/cli.py:58-65
+        result = translate_client.translate(
+            input_text,
+            source_language="en",
+            target_language="fr",
+            format_="text",
+        )
+        translated_text = result["translatedText"]
+        print(translated_text)
+```
+- `translate_client = translate.Client()` was built at **import** (`translate_text/cli.py:20`), from `google.cloud.translate_v2`, so the credentials lookup runs before argparse: even `--help` needs the key (§4 Step 21).
+- `format_="text"` (with a trailing underscore, because `format` is a Python builtin): treat the input as plain text rather than HTML, so the API doesn't HTML-escape apostrophes and the like.
+- The response is a dict; `translatedText` is the French string. Change `target_language` (and E's voice) to retarget everything downstream (§8 D1).
+
+**8. The bonus reads its key at import time**
+
+```python
+# synthesis_audio/cli_11.py:29-39
+#Define the path to the secrets file
+secrets_file_path = 'secrets/11lab_api_key.txt'
+
+# Read the file and set the environment variable
+with open(secrets_file_path) as f:
+    for line in f:
+        if 'XI_API_KEY' in line:
+            key, value = line.strip().split('=')
+            os.environ[key] = value
+
+XI_API_KEY = os.environ['XI_API_KEY']  
+```
+- Module-level code runs on every invocation, including `--download`: no key file means `FileNotFoundError` at line 33 (captured, §4 Step 23).
+- `split('=')` assumes exactly one `=`; `strip()` removes a trailing `\r` from a Windows editor. A second `=` on the line raises `ValueError: too many values to unpack (expected 2)`.
+- Spaces matter: `XI_API_KEY = abc` sets a variable named `'XI_API_KEY '` (with a trailing space), and line 39 then raises `KeyError: 'XI_API_KEY'`.
+
+**9. What Git will and won't keep**
+
+```gitignore
+# transcribe_audio/.gitignore:1-9
+# misc
+.DS_Store
+/secrets
+docker-shell.sh
+Dockerfile
+pyproject.toml
+uv.lock
+/input_audios
+/text_prompts
+```
+- `/secrets`: the key stays out of Git.
+- `docker-shell.sh`, `Dockerfile`, `pyproject.toml`, `uv.lock`: so the course repo never receives students' solutions, **your own work is invisible to `git status`** (§6 G14).
+- `/input_audios`, `/text_prompts`: downloaded data and outputs. `synthesis_audio_en/.gitignore:8`, `translate_text/.gitignore:8-9` and `synthesis_audio/.gitignore:8-10` do the same for their folders. `generate_text/` has **no** `.gitignore`, so its Dockerfile, `uv.lock` and data folders show up as untracked (captured, §4 Step 27); the root `.gitignore:4` (`secrets/`) still protects its key.
+
+**10. Where the course goes next: the secret mounted at run time**
+
+```bash
+# origin/solution:transcribe_audio/docker-shell.sh:95-100
+    # Run Container
+    docker run --rm --name $IMAGE_NAME -ti \
+    -v "$BASE_DIR":/app \
+    -v "$SECRETS_DIR":/secrets \
+    -e GOOGLE_APPLICATION_CREDENTIALS=$GOOGLE_APPLICATION_CREDENTIALS \
+    $CONTAINER_IMAGE
+```
+- Not used on `main`; last year's solution, and the shape of L04. `BASE_DIR=$(pwd)`, `SECRETS_DIR=$(pwd)/../../secrets/` and `GOOGLE_APPLICATION_CREDENTIALS=/secrets/mega-pipeline.json` are set at `:8-10`.
+- The second `-v` mounts a `secrets/` folder that sits **next to the repo** (two levels up from the component) at `/secrets`. The key is never in the build context, so it can't be baked into an image, and the absolute `/secrets/…` path works from any directory.
+- `--name $IMAGE_NAME` gives the container a predictable name; `$CONTAINER_IMAGE` is the local image if there is one, else `dlops/<name>` from Docker Hub (`:86-93`). The script's `prod` mode builds `linux/amd64,linux/arm64` with `docker buildx` and pushes (`:51-72`).
+
+---
+
+## 6. Gotchas and common errors
+
+**G1. The service-account key gets baked into your image.**
+- **Symptom:** `docker run --rm --entrypoint ls transcribe_audio -la /app/secrets` (no mount) lists `mega-pipeline.json` (captured with a stand-in, §4 Step 24). The build's `SecretsUsedInArgOrEnv` warning does not catch it: it fires on the variable's name, not on the copied file.
+- **Cause:** `COPY --chown=app:app . ./` (`README.md:217`; `transcribe_audio/README.md:82`) and no `.dockerignore` anywhere on `main` (nor on `simple`, `solution` or `flexible-workflow`). `.gitignore` doesn't apply to Docker builds. The optional push (`transcribe_audio/README.md:136-140`) would publish the key.
+- **Fix:** a `.dockerignore` containing `secrets/` in every component, then rebuild (captured: `ls: cannot access '/app/secrets': No such file or directory`, §4 Step 25). Prune the older builds (§8 B5). If you already pushed, delete the Docker Hub repository and **tell the staff so the key can be rotated**. Long term: keep secrets outside the repo and mount them at run time (§5 excerpt 10).
+
+**G2. Wrong or default `group_name`.**
+- **Symptom:** your leaderboard row stays empty, or your uploads land under `…/pavlos/…`; a later stage downloads nothing, with no error.
+- **Cause:** the default is `"pavlos"` with no assert (`transcribe_audio/cli.py:21` and the corresponding line in every `cli.py`). Each stage downloads `<prefix>/<group_name>/…`, written by the previous one, so the value must be **identical in all five** files (and `cli_11.py`).
+- **Fix:** set it everywhere before the first run (`README.md:124`); `grep -n "^group_name" */cli.py` from the repo root shows all of them at once.
+
+**G3. `requires-python` newer than the image's Python 3.12.**
+- **Symptom:** during `docker build`, `RUN uv sync` either
+  - **silently downloads a separate CPython** and builds the venv on it. Captured with `generate_text`'s committed `>=3.14`: `Downloading cpython-3.15.0-linux-x86_64-gnu (download) (35.9MiB)`, `Using CPython 3.15.0`, and in the container `readlink -f $(which python)` → `/home/app/.local/share/uv/python/cpython-3.15.0-linux-x86_64-gnu/bin/python3.15`. The build succeeds, but the `python:3.12` base is now pointless, the image is bigger, every rebuild downloads it again, and you run on a Python nobody tested; or,
+  - if Python downloads are disabled (`UV_PYTHON_DOWNLOADS=never`), **fails** with `error: No interpreter found for Python >=3.14 in managed installations or search path` and the hint that downloads are set to `'never'` (the digest's check).
+- **Cause:** `uv init --bare` stamps the Python it finds on **your laptop** (captured: `>=3.11` on Python 3.11.2; a 3.13 laptop gets `>=3.13`); `generate_text/pyproject.toml:4` is committed as `>=3.14`.
+- **Fix:** `requires-python = ">=3.12"` (last year's README pinned `">=3.12,<3.13"`, `origin/solution:transcribe_audio/README.md:36`), or `uv init --bare --python 3.12`. **Checkpoint:** the `uv sync` build step says `Using CPython 3.12.15 interpreter at: /usr/local/bin/python3` (captured after the fix, §4 Step 19).
+
+**G4. `uv init --bare` fails in `generate_text`.**
+- **Symptom:** ``error: Project is already initialized in `/home/student/mega-pipeline/generate_text` (`pyproject.toml` file exists)``, exit status 2 (captured).
+- **Cause:** `generate_text/pyproject.toml` and `main.py` are committed, yet `generate_text/README.md:20-24` still says to run `uv init --bare`.
+- **Fix:** skip the step; edit `requires-python` (G3); `main.py` can be ignored or deleted.
+
+**G5. `DefaultCredentialsError: File secrets/mega-pipeline.json was not found.`**
+- **Cause:** the env var is a relative path (`README.md:195`), checked relative to the current directory (raised at `google/auth/_default.py`, line 178, in the captured tracebacks). It appears if:
+  - the key isn't in *this* component's `secrets/` (each folder needs its own copy);
+  - you `cd`'d away from `/app` inside the container (§8 C2);
+  - you ran `docker run` from the repo root or another folder, so `/app` isn't the component folder.
+
+  In `translate_text`, `synthesis_audio_en` and `synthesis_audio` the client is created at import (`translate_text/cli.py:20`, `synthesis_audio_en/cli.py:22`, `synthesis_audio/cli.py:21`), so even `--help` fails (all three captured). In `transcribe_audio` it appears at the first command that builds a client (captured at `--download`, line 36); in `generate_text`, at `--generate`.
+- **Fix:** `cd /app`, check that `ls secrets/` shows the key, and run `docker run` from inside the component folder.
+
+**G6. An Apple Silicon image pushed to Docker Hub won't run on an amd64 VM.**
+- **Symptom:** on the VM, `exec format error`, or a warning that the image's platform (`linux/arm64`) does not match the host's (`linux/amd64`).
+- **Cause:** `docker build` on an M-series Mac produces `linux/arm64` (`python:3.12-slim-bookworm` exists for both). Locally everything works.
+- **Fix:** `docker buildx build --platform linux/amd64,linux/arm64 -t <USER NAME>/<name> --push .`, which is what `origin/solution:transcribe_audio/docker-shell.sh:62-70` does in `prod` mode (§8 D3).
+
+**G7. ``error: failed to create file `/app/pyproject.toml`: Permission denied (os error 13)`` from `uv add` on a Linux laptop or VM.**
+- **Cause:** the container runs as uid 1000 (`README.md:208`), but on native Linux the bind-mounted folder keeps your laptop's ownership. Captured with a root-owned copy of the folder (`ls -ld /app` → `root root`, `id` → `uid=1000(app)`). The first user on most Linux desktops is uid 1000, so it usually works; it breaks when you work as root (e.g. on a VM) or as another uid. Docker Desktop on macOS and Windows maps ownership for you. The same cause gives `PermissionError: [Errno 13] Permission denied` when `cli.py` creates `input_audios/`.
+- **Fix** (not from the README): `sudo chown -R 1000:1000 .` in the component folder on the laptop, or `chmod -R a+rwX` it. Running with `-u "$(id -u):$(id -g)"` is not a clean fix: that uid has no home folder in the image and doesn't own `/home/app/.venv` (the digest's check: `uv add` then failed with `` Failed to initialize cache at `/.cache/uv` `` and `Permission denied (os error 13)`).
+
+**G8. `FileNotFoundError: [Errno 2] No such file or directory: 'ffmpeg'` at `transcribe_audio/cli.py:69`.**
+- **Cause:** the Debian `ffmpeg` program isn't in the image. The usual way to get here: copying the appendix's Dockerfile (`ARG DEBIAN_PACKAGES="build-essential curl"`, `README.md:179`) or B's.
+- **Fix:** `ARG DEBIAN_PACKAGES="build-essential ffmpeg"` (`transcribe_audio/README.md:45`), exit, rebuild. The big `RUN` step runs again, because its package list changed (§8 C4).
+
+**G9. `AttributeError: module 'ffmpeg' has no attribute 'input'` or `ModuleNotFoundError: No module named 'ffmpeg'`.**
+- **Cause:** `uv add ffmpeg` or `uv add python-ffmpeg` (different PyPI projects, also imported as `ffmpeg`), or the package was never added.
+- **Fix:** inside the container, `uv remove ffmpeg` (or `python-ffmpeg`), `uv add ffmpeg-python` (`transcribe_audio/README.md:108`), then exit and rebuild (§8 C3).
+
+**G10. `ModuleNotFoundError: No module named 'google'` the next day.**
+- **Cause:** you ran `uv add` in an earlier `--rm` container but never rebuilt, so the packages lived in that container's writable layer (captured: a new container failed again, §4 Step 14).
+- **Fix:** `docker build -t <name> .` again: `COPY` brings the new `pyproject.toml`/`uv.lock`, and `uv sync` installs them into the image (`transcribe_audio/README.md:110`).
+
+**G11. Re-running does nothing.**
+- **Symptom:** `--transcribe`, `--generate` or `--translate` prints nothing new; `--synthesis` prints nothing.
+- **Cause:** skip-if-exists logic. Local outputs persist on your laptop across container runs (`transcribe_audio/cli.py:61-62`, `generate_text/cli.py:57-58`, `translate_text/cli.py:52-53`), and synthesis skips if the **bucket** object exists (`synthesis_audio_en/cli.py:69`, `synthesis_audio/cli.py:68`).
+- **Fix:** delete the local output file (or, for synthesis, the object in the bucket) to force a redo.
+
+**G12. Quota or model errors on the shared project.**
+- `429 RESOURCE_EXHAUSTED` from Gemini, Speech-to-Text or Text-to-Speech: the whole class shares one project's quotas during the lecture. Wait a minute and retry.
+- `404 … Publisher Model … was not found` from `--generate`: the model id is retired or misspelled. `gemini-2.5-flash-lite`, the default at `generate_text/cli.py:73`, is retired on Vertex AI on 2026-10-20. Start the container with `-e GEMINI_MODEL=<current model id>`.
+
+**G13. Docker Hub login leaks your token into shell history.**
+- **Cause:** `docker login -u <USER NAME> -p <ACCESS TOKEN>` (`transcribe_audio/README.md:138`); Docker itself warns that a password on the command line is insecure.
+- **Fix:** `docker login -u <USER NAME>` and paste the token at the prompt, or `echo "$TOKEN" | docker login -u <USER NAME> --password-stdin`.
+
+**G14. Your Dockerfiles and `pyproject.toml` "disappear" when you commit to your own repo.**
+- **Cause:** the component `.gitignore` files ignore them (`transcribe_audio/.gitignore:4-7`, and the same lines in `synthesis_audio_en`, `translate_text` and `synthesis_audio`). Captured: after all five components, `git status` lists only `generate_text/` and the edited `cli.py` (§4 Step 27).
+- **Fix:** `git add -f transcribe_audio/Dockerfile transcribe_audio/pyproject.toml transcribe_audio/uv.lock` (and the same for the other folders), or remove those lines in your own copy. Never remove `/secrets`, and don't commit the downloaded data.
+
+**G15. The run command misbehaves on Windows.**
+- **Symptoms:** `the input device is not a TTY`, or a path split at a space.
+- **Fix:** use Git BASH, quote `"$(pwd)"`, and prefix `winpty` (`README.md:230-235`). If `/app` still looks empty, Git BASH may have rewritten the path; prefixing the command with `MSYS_NO_PATHCONV=1` is a common workaround (not from the README, not checked).
+
+**G16. `docker run … transcribe_audio python cli.py -d` fails instead of running the CLI.**
+- **Symptom** (captured, `laptop/18-g16-entrypoint.txt`):
+  ```
+  $ docker run --rm -v "$(pwd):/app" transcribe_audio python cli.py -d
+  /usr/local/bin/python: /usr/local/bin/python: cannot execute binary file
+  ```
+  Exit status 126.
+- **Cause:** `ENTRYPOINT ["/bin/bash"]` (`README.md:222`). Words after the image name replace `CMD`, so the container runs `/bin/bash python cli.py -d`: bash treats `python` as a script file to read, finds the binary on `PATH` (the image's own `/usr/local/bin/python`, since nothing activated the venv) and refuses.
+- **Fix** (captured with `--help`, `laptop/19-g16-fix.txt`, which printed the usage block):
+  ```bash
+  docker run --rm -v "$(pwd):/app" transcribe_audio -c "source /home/app/.venv/bin/activate && python cli.py -d"
+  ```
+  or `docker run --rm -v "$(pwd):/app" --entrypoint /home/app/.venv/bin/python transcribe_audio cli.py -d`. `-ti` isn't needed when nothing is interactive (§8 C1).
+
+**G17. `ffmpeg.Error` on a file that isn't audio.**
+- **Cause:** `transcribe()` processes **every** file in `input_audios/` (`transcribe_audio/cli.py:54-56`). On a Mac, opening the bind-mounted folder in Finder can create `.DS_Store` there.
+- **Fix:** delete stray files, or re-run `--download`, which wipes the folder first (`transcribe_audio/cli.py:33`).
+
+**G18. Ports and leftover containers.** Neither applies here: nothing is published with `-p`, and `--rm` removes every container on exit. If `docker ps -a` shows leftovers, they came from runs without `--rm`; remove them with `docker rm <id>`.
+
+**G19. "The venv isn't active" because the prompt has no `(transcribe-audio)` prefix.**
+- **Symptom:** the prompt is just `app@<id>:/app$` (captured).
+- **Cause:** `exec bash` starts a new interactive shell that reads `/home/app/.bashrc`, which resets the prompt; the exported `VIRTUAL_ENV` and `PATH` survive.
+- **Fix:** nothing to fix. Check with `which python` (`/home/app/.venv/bin/python`) or `echo $VIRTUAL_ENV`.
+
+**G20. A transcript that says `None`.**
+- **Cause:** `text = "None"` (`transcribe_audio/cli.py:80`) is written unchanged when Speech-to-Text returns no results (`:84`, `:95-96`), e.g. for silence or the wrong audio. The file then counts as done (skip-if-exists, `:61-62`), and `--upload` ships it to B.
+- **Fix:** `cat` the `.txt` before uploading; delete it and re-run `--transcribe` if it says `None` (§8 C5).
+
+**G21. `docker build` fails at `RUN uv sync` with ``error: No `pyproject.toml` found in current directory or any parent directory``.**
+- **Cause:** you skipped `uv init --bare`, or ran it in another folder (captured, §4 Step 7: `Dockerfile:27`, `exit code: 2`).
+- **Fix:** run `uv init --bare` in the component folder (check `requires-python`, G3) and build again.
+
+---
