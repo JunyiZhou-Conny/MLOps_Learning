@@ -1056,3 +1056,360 @@ Cloning into 'mega-pipeline'...
   Python 3.12.15
   ```
 - Because `COPY . ./` comes before `RUN uv sync`, every later edit in the folder, even the group name, re-runs `uv sync` on the next build (3.3, §8 B3).
+
+### Part B: 🗒️ Task B · `generate_text` (`generate_text/README.md`)
+
+Same recipe, two surprises.
+
+**Step 15. `cd`, the key, and `uv init --bare` fails** [B1–B3] (`:11-24`).
+- **Action:** `cd ../generate_text` and copy the key into its `secrets/` (`:13-17`).
+- *(extra)* Look first (`laptop/30-b-ls.txt`):
+  ```
+  $ ls -a; cat pyproject.toml
+  .
+  ..
+  README.md
+  cli.py
+  main.py
+  pyproject.toml
+  secrets
+  [project]
+  name = "generate-text"
+  version = "0.1.0"
+  requires-python = ">=3.14"
+  dependencies = [
+      "google-cloud-storage>=3.12.0",
+      "google-genai>=2.8.0",
+  ]
+  ```
+- **Action** [B3], as the README says (`:22`; `laptop/31-b-uv-init.txt`):
+  ```
+  $ uv init --bare
+  error: Project is already initialized in `/home/student/mega-pipeline/generate_text` (`pyproject.toml` file exists)
+  ```
+  Exit status 2. The README still says to run it, and even promises "no sample `main.py`" (`:24`) next to a committed `main.py`. Skip this step and ignore `main.py` (a leftover that prints `Hello from generate-text!`).
+- **Fix now** (not in the README): edit `pyproject.toml` line 4 to `requires-python = ">=3.12"` **before** the first build. The recording kept `>=3.14` until Step 19 to show what happens without the fix.
+
+**Step 16. Dockerfile and build** [B4, B5] (`:36-95`).
+- **Action:** the same Dockerfile as A's, with one line changed: line 3 becomes `ARG DEBIAN_PACKAGES="build-essential"` (`:45`), because "this component doesn't touch audio" (`:38`). Then `docker build -t generate_text .`
+- **Captured** live view (`laptop/32-b-build.txt`, trimmed):
+  ```
+  $ docker build -t generate_text .
+  [+] Building 54.0s (10/10) FINISHED                              docker:default
+  …
+   => [2/5] RUN apt-get update &&     apt-get upgrade -y &&     apt-get in  22.8s
+   => [3/5] WORKDIR /app                                                     0.1s
+   => [4/5] COPY --chown=app:app . ./                                        0.0s
+   => [5/5] RUN uv sync                                                      5.9s
+  …
+  ```
+  The live view hides what `uv sync` did; the full log shows it (`laptop/32-b-build.plain.txt`):
+  ```
+  #9 [5/5] RUN uv sync
+  #9 0.669 Downloading cpython-3.15.0-linux-x86_64-gnu (download) (35.9MiB)
+  #9 3.049  Downloaded cpython-3.15.0-linux-x86_64-gnu (download)
+  #9 3.266 Using CPython 3.15.0
+  #9 3.266 Creating virtual environment at: /home/app/.venv
+  #9 4.407 Resolved 35 packages in 1.13s
+  …
+  #9 5.613 Installed 34 packages in 312ms
+  …
+  #9 5.613  + google-genai==2.30.0
+  …
+  ```
+- **Under the hood:** the apt step runs again (a different package list: 46 packages, 73.8 MB, 22.8 s). The image's Python 3.12 is outside `>=3.14`, so uv downloaded the newest Python in range, CPython 3.15.0 at the time of recording, and built the venv on it (3.5, §6 G3). Both packages were already listed, so the first build already installs them.
+
+**Step 17. Run, `uv add`, group name, `--help`** [B6–B9] (`:97-125`).
+- **Action:** `docker run --rm -ti -v "$(pwd):/app" generate_text` (`:99`).
+- *(extra)* Which Python the venv got (`generate_text/01-python-version.txt`):
+  ```
+  app@…:/app$ which python; python --version; readlink -f $(which python)
+  /home/app/.venv/bin/python
+  Python 3.15.0
+  /home/app/.local/share/uv/python/cpython-3.15.0-linux-x86_64-gnu/bin/python3.15
+  ```
+- **Action** [B7] (`:104-106`; `generate_text/02-uv-add.txt`):
+  ```
+  app@…:/app$ uv add google-cloud-storage google-genai
+  Resolved 35 packages in 14ms
+  Checked 34 packages in 0.61ms
+  ```
+  Nothing new: `pyproject.toml` stays as it was (`generate_text/03-cat-pyproject.txt`); `uv add` only writes `uv.lock`.
+- **Action** [B8]: set `group_name` on line 19 of `generate_text/cli.py`.
+- **Action** [B9] (`generate_text/04-help.txt`):
+  ```
+  app@…:/app$ python cli.py --help
+  usage: cli.py [-h] [-d] [-g] [-u]
+
+  Generate text from prompt
+
+  options:
+    -h, --help      show this help message and exit
+    -d, --download  Download text prompts from GCS bucket
+    -g, --generate  Generate a text paragraph
+    -u, --upload    Upload paragraph text to GCS bucket
+  ```
+  Identical to the README's block (`:116-124`), and it needs no key: the Gemini client, created at import (`generate_text/cli.py:23-25`), loads credentials only on its first request.
+
+**Step 18. Download, generate, upload** [B10–B12] (`:127-132`; `README.md:139-144`).
+- **Action:** `python cli.py -d`, `python cli.py -g`, `python cli.py -u` (long forms `--download`, `--generate`, `--upload`), with your key.
+- **Under the hood:**
+  - `--download` deletes the **whole** local `text_prompts/` and fetches only `text_prompts/<group>/input-*.txt` (`generate_text/cli.py:33-44`). If A hasn't uploaded for your group, nothing comes down, without an error.
+  - `--generate` wraps each transcript in a fixed prompt ("Create a transcript for the podcast about cheese with 1000 or more words", `:65-72`) and calls Gemini on Vertex AI in `us-central1` with the model in `$GEMINI_MODEL`, default `gemini-2.5-flash-lite` (`:73-77`). It skips any transcript whose output already exists (`:57-58`).
+  - `--upload` pushes `text_paragraphs/<group>/input-*.txt` (`:88-104`).
+- **Expected with your key** (from the code; not recorded): the prompt printed, three blank lines, `Generated text:` and a long podcast script; then `upload` and one `Uploading: text_paragraphs/<group>/…` line per file.
+- **Model retirement.** Vertex AI retires `gemini-2.5-flash-lite` on **2026-10-20**. After that date the default fails; start the container with a current model id instead *(extra)*:
+  ```bash
+  docker run --rm -ti -e GEMINI_MODEL=<current model> -v "$(pwd):/app" generate_text
+  ```
+- **If it fails:** `404 … Publisher Model … not found` means a retired or misspelled model; `429 RESOURCE_EXHAUSTED` means the class is sharing one project's quota: wait and retry (§6 G12).
+
+**Step 19. Exit, fix `requires-python`, rebuild** [B13] (`:108`).
+- The rebuild without the fix (`laptop/33-b-rebuild.plain.txt`) downloads CPython 3.15.0 **again** (`Downloading cpython-3.15.0-linux-x86_64-gnu (download) (35.9MiB)`) and installs 34 packages on it.
+- *(extra)* After setting line 4 to `>=3.12` (`laptop/34-b-fix-requires-python.txt`):
+  ```
+  $ grep -n requires-python pyproject.toml; git status --short .
+  4:requires-python = ">=3.12"
+   M pyproject.toml
+  ?? Dockerfile
+  ?? uv.lock
+  ```
+  This folder has no `.gitignore`, so Git sees your `Dockerfile` and `uv.lock`, and the edited, tracked `pyproject.toml` (§9 E12).
+- **Action:** `docker build -t generate_text .` Captured: `Building 10.4s` with `CACHED [2/5]`; the full log (`laptop/35-b-rebuild-312.plain.txt`):
+  ```
+  #9 [5/5] RUN uv sync
+  #9 0.241 Using CPython 3.12.15 interpreter at: /usr/local/bin/python3
+  #9 0.241 Creating virtual environment at: /home/app/.venv
+  #9 1.741 Resolved 35 packages in 1.49s
+  …
+  #9 3.202 Installed 34 packages in 310ms
+  ```
+- **Checkpoint** *(extra)*, in a new container (`generate_text/05-python-version-312.txt`):
+  ```
+  app@…:/app$ python --version; readlink -f $(which python)
+  Python 3.12.15
+  /usr/local/bin/python3.12
+  ```
+  `python cli.py --help` prints the same block as before (`generate_text/06-help-312.txt`).
+
+### Part C: 🔊 Task C · `synthesis_audio_en` (`synthesis_audio_en/README.md`)
+
+**Step 20. The speed round begins** [C1–C12].
+- **Action:** `cd ../synthesis_audio_en`, key into `secrets/`, then `uv init --bare` (`laptop/40-c-uv-init.txt`):
+  ```
+  $ uv init --bare; cat pyproject.toml
+  Initialized project `synthesis-audio-en`
+  [project]
+  name = "synthesis-audio-en"
+  version = "0.1.0"
+  requires-python = ">=3.11"
+  dependencies = []
+  ```
+  If yours stamps `>=3.13` or newer, change it to `>=3.12` (here, and in D and E).
+- **Action:** the Dockerfile is B's (line 3 `ARG DEBIAN_PACKAGES="build-essential"`, `:45`). The text above it says "keep `ffmpeg` in the system packages" (`:38`); the code block, which leaves it out, is right: this `cli.py` never uses ffmpeg (§9 E3).
+- **Action:** `docker build -t synthesis_audio_en .` (`laptop/41-c-build.txt`, trimmed):
+  ```
+  $ docker build -t synthesis_audio_en .
+  [+] Building 0.6s (10/10) FINISHED                               docker:default
+  …
+   => CACHED [2/5] RUN apt-get update &&     apt-get upgrade -y &&     apt-  0.0s
+   => CACHED [3/5] WORKDIR /app                                              0.0s
+   => [4/5] COPY --chown=app:app . ./                                        0.0s
+   => [5/5] RUN uv sync                                                      0.2s
+  …
+  ```
+  0.6 s: C's Dockerfile is identical to B's up to line 21, so Docker reuses B's apt layer.
+- **Action:** `docker run --rm -ti -v "$(pwd):/app" synthesis_audio_en` (`:99`), then (`synthesis_audio_en/01-uv-add.txt`, trimmed):
+  ```
+  app@…:/app$ uv add google-cloud-storage google-cloud-texttospeech
+  Resolved 25 packages in 1.16s
+  …
+  Installed 24 packages in 223ms
+  …
+   + google-cloud-storage==3.17.0
+   + google-cloud-texttospeech==2.38.0
+  …
+  ```
+- **Action:** set `group_name` on line 18, then `python cli.py --help`. **Recorded without the key** (`synthesis_audio_en/03-help.txt`, trimmed):
+  ```
+  app@…:/app$ python cli.py --help
+  Traceback (most recent call last):
+    File "/app/cli.py", line 22, in <module>
+      client = texttospeech.TextToSpeechLongAudioSynthesizeClient()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  …
+  google.auth.exceptions.DefaultCredentialsError: File secrets/mega-pipeline.json was not found.
+  ```
+  Line 22 builds the Text-to-Speech client as soon as the script starts, before argparse reads any flag, so even `--help` needs the key. **Expected** with the key, the README's block (`synthesis_audio_en/README.md:115-123`, `expected/synthesis_audio_en-help.txt`):
+  ```
+  $ python cli.py --help
+  usage: cli.py [-h] [-d] [-s]
+
+  Synthesis audio from text
+
+  options:
+    -h, --help       show this help message and exit
+    -d, --download   Download paragraph of text from GCS bucket
+    -s, --synthesis  Synthesis audio
+  ```
+- **Action:** `python cli.py -d` and `python cli.py -s` (`--download`, `--synthesis`; `README.md:147-151`), with your key.
+- **Under the hood** (`synthesis_audio_en/cli.py:30-91`):
+  - `--download` fetches `text_paragraphs/<group>/input-*.txt`, B's output.
+  - `--synthesis` checks, per file, whether `text_audios/<group>/<uuid>.mp3` **already exists in the bucket** (`blob.exists()`, `:69`). If not, it sends a `SynthesizeLongAudioRequest` (voice `en-US-Standard-B`, `LINEAR16`, `output_gcs_uri=gs://mega-pipeline-bucket/text_audios/<group>/<uuid>.mp3`, `:77-86`) and waits up to 300 s for the operation (`:88-90`). Google's service writes the audio straight into the bucket, so C has no `--upload` ("synthesis writes audio directly to GCS — no separate `--upload` step needed", `README.md:151`).
+- **Expected with your key** (from the code): `synthesis`, then `Audio file will be saved to GCS bucket automatically.` (`:91`) per file, and no new local audio file.
+- **Action:** `exit`, `docker build -t synthesis_audio_en .` again: `Resolved 25 packages`, `Installed 24 packages`, `Building 10.1s` (`laptop/42-c-rebuild.*`).
+
+### Part D: 🇫🇷 Task D · `translate_text` (`translate_text/README.md`)
+
+**Step 21. Translate** [D1–D13].
+- **Action:** `cd ../translate_text`, key, `uv init --bare` (``Initialized project `translate-text` ``, `>=3.11`, `laptop/50-d-uv-init.txt`), B's Dockerfile (`:45`; "No audio here, so drop `ffmpeg`", `:38`), `docker build -t translate_text .` (`CACHED [2/5]`, `Building 0.6s`), `docker run --rm -ti -v "$(pwd):/app" translate_text` (`:99`).
+- **Action** (`translate_text/01-uv-add.txt`, trimmed):
+  ```
+  app@…:/app$ uv add google-cloud-storage google-cloud-translate
+  Resolved 26 packages in 1.61s
+  …
+  Installed 25 packages in 181ms
+  …
+   + google-cloud-translate==3.28.0
+  …
+   + grpc-google-iam-v1==0.14.5
+  …
+  ```
+  `google.cloud.translate_v2`, which `cli.py` imports (`translate_text/cli.py:9`), ships inside `google-cloud-translate`.
+- **Action:** `group_name` on line 18; `python cli.py --help`. Recorded without the key it fails at import, like C (`translate_text/03-help.txt`, trimmed):
+  ```
+  app@…:/app$ python cli.py --help
+  Traceback (most recent call last):
+    File "/app/cli.py", line 20, in <module>
+      translate_client = translate.Client()
+                         ^^^^^^^^^^^^^^^^^^
+  …
+    File "/home/app/.venv/lib/python3.12/site-packages/google/cloud/client/__init__.py", line 218, in __init__
+      credentials, _ = google.auth.default(scopes=scopes)
+  …
+  google.auth.exceptions.DefaultCredentialsError: File secrets/mega-pipeline.json was not found.
+  ```
+  Expected with the key: the README's block (`translate_text/README.md:115-124`): `usage: cli.py [-h] [-d] [-t] [-u]`, `Translate English to French`, and the three options.
+- **Action:** `python cli.py -d`, `python cli.py -t`, `python cli.py -u` (`--download`, `--translate`, `--upload`; `README.md:153-157`), with your key.
+- **Under the hood** (`translate_text/cli.py:28-88`): D reads `text_paragraphs/<group>/`, the **same** input as C, not C's output. It calls Translation v2 with `source_language="en"`, `target_language="fr"`, `format_="text"` (`:58-63`), prints `result["translatedText"]`, saves it to `text_translated/<group>/<uuid>.txt`, and `--upload` pushes those files. Translation answers at once, with no operation to wait on, so D needs its own upload.
+- **Expected with your key** (from the code): `translate` and the French text, printed; then `upload` and one `Uploading: text_translated/<group>/…` line per file.
+- **Action:** `exit`, `docker build -t translate_text .` again: `Resolved 26 packages`, `Installed 25 packages`, `Building 8.3s` (`laptop/52-d-rebuild.*`).
+
+### Part E: 🔊 Task E · `synthesis_audio` (`synthesis_audio/README.md`)
+
+**Step 22. Synthesize the French** [E1–E12].
+- **Action:** `cd ../synthesis_audio`, key, `uv init --bare` (``Initialized project `synthesis-audio` ``, `>=3.11`, `laptop/60-e-uv-init.txt`), B's Dockerfile (`:45`; the text at `:38` again says "keep `ffmpeg`": ignore it), `docker build -t synthesis_audio .` (`CACHED [2/5]`, `Building 0.7s`), `docker run --rm -ti -v "$(pwd):/app" synthesis_audio` (`:99`).
+- **Action:** `uv add google-cloud-storage google-cloud-texttospeech` (`:104-106`): `Resolved 25 packages`, `Installed 24 packages` (`synthesis_audio/01-uv-add.txt`).
+- **Action:** `group_name` on line 18; `python cli.py --help`. Without the key it fails at import (line 21, `synthesis_audio/03-help.txt`). Expected with the key: the README's block (`synthesis_audio/README.md:115-123`), except one line: the README shows `Synthesis audio from text`, but the code's description is `"Transcribe audio file to text"` (`synthesis_audio/cli.py:105`), pasted from A, so that is what a real run prints (§9 E6).
+- **Action:** `python cli.py -d`, `python cli.py -s` (`README.md:160-165`), with your key.
+- **Under the hood** (`synthesis_audio/cli.py:29-90`): identical to C, but it reads `text_translated/<group>/`, uses voice `fr-FR-Standard-C` (`:47-48`) and writes `output_audios/<group>/<uuid>.mp3` straight into the bucket. No `--upload` (`README.md:165`).
+- **Action:** `exit`, `docker build -t synthesis_audio .` again: `Resolved 25 packages`, `Installed 24 packages`, `Building 7.6s` (`laptop/62-e-rebuild.*`).
+- **Checkpoint:** with all five done, your group's row on the leaderboard is complete.
+
+**Step 23. Bonus: ElevenLabs, in the instructor's voice** [X1–X3] (`:132-156`).
+- **Action:** create an ElevenLabs account and API key (`:138`); create `secrets/11lab_api_key.txt` with the line `XI_API_KEY=your_api_key_here` (`:139-142`), your key in place of the placeholder, with no spaces around `=`; set `group_name` on line 19 of `cli_11.py` (`:112`); then, inside (`synthesis_audio/04-bonus-uv-add-requests.txt`):
+  ```
+  app@…:/app$ uv add requests
+  Resolved 25 packages in 12ms
+  Checked 24 packages in 0.63ms
+  ```
+  `requests` was already installed (a dependency of `google-cloud-storage`); this records it as a direct dependency, `"requests>=2.34.2"` (`files/synthesis_audio.pyproject.toml`). That is still right: `cli_11.py` imports `requests` itself (`cli_11.py:8`).
+- **Action:** `python cli_11.py --download`, `python cli_11.py --synthesis`, `python cli_11.py --upload` (`:150-154`). **Recorded without the key file** (`synthesis_audio/05-bonus-cli11-download.txt`):
+  ```
+  app@…:/app$ python cli_11.py --download
+  Traceback (most recent call last):
+    File "/app/cli_11.py", line 33, in <module>
+      with open(secrets_file_path) as f:
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  FileNotFoundError: [Errno 2] No such file or directory: 'secrets/11lab_api_key.txt'
+  ```
+  The script reads the key file at import (`cli_11.py:30-39`), so without it every flag fails, even `--download`.
+- **Under the hood** (`cli_11.py:60-133`): POST each translated text to `https://api.elevenlabs.io/v1/text-to-speech/<VOICE_ID>/stream` with model `eleven_multilingual_v2`, stream the audio into `output_audios_pp/<group>/<uuid>.mp3` on your laptop ("saves audio **locally first**", `:156`), then `--upload` pushes those files under the same names. If ElevenLabs refuses, `--synthesis` just prints the response body and carries on (`:111-113`): read its output.
+- **Costs:** your own ElevenLabs quota. Whether your account may use the instructor's voice id is an open question (§9 Q5).
+
+### Part F: after the README
+
+**Step 24. Is the key inside your image?** *(extra)*
+- **Action:** with a key in `secrets/` and the image rebuilt, list `/app/secrets` **inside the image**, with no mount. Recorded with an 82-byte stand-in file (`laptop/22-g1-key-in-image.txt`):
+  ```
+  $ docker run --rm --entrypoint ls transcribe_audio -la /app/secrets
+  total 12
+  drwxr-xr-x 2 app app 4096 Oct 13 01:48 .
+  drwxr-xr-x 1 app app 4096 Oct 13 01:47 ..
+  -rw-r--r-- 1 app app    0 Oct 13 01:42 .gitkeep
+  -rw-r--r-- 1 app app   82 Oct 13 01:47 mega-pipeline.json
+  ```
+- **Under the hood:** `--entrypoint ls` replaces bash, so the arguments after the image name go to `ls`. Without `-v`, `/app` is what `COPY . ./` put in the image: the whole build context, `secrets/` included. Docker doesn't read `.gitignore` (3.8). With the README's order (key in Step 4, build in Step 7), every image you built today contains your key.
+
+**Step 25. Keep it out: `.dockerignore`** *(extra)*
+- **Action:** in each of the five component folders, create a file `.dockerignore` with one line, `secrets/` (`laptop/23-g1-dockerignore.txt`):
+  ```
+  $ cat .dockerignore
+  secrets/
+  ```
+  Then rebuild each image (`docker build -t transcribe_audio .` etc.) and list again (`laptop/25-g1-key-not-in-image.txt`):
+  ```
+  $ docker run --rm --entrypoint ls transcribe_audio -la /app/secrets
+  ls: cannot access '/app/secrets': No such file or directory
+  ```
+  Exit status 2.
+- **Checkpoint:** the app still works: at run time the bind mount brings your `secrets/` folder in, and `GOOGLE_APPLICATION_CREDENTIALS` still points at `secrets/mega-pipeline.json` under `/app`.
+- **Then:** remove the older builds, which still hold the key (`docker image prune -f`, `docker builder prune`, Step 27 and §8 B5).
+
+**Step 26. Optional: push to Docker Hub** [H1–H3] (`transcribe_audio/README.md:136-140`; the same section in every component README). Not captured.
+- **Action:** sign up and create an access token (`:137`), then:
+  ```bash
+  docker login -u <USER NAME> -p <ACCESS TOKEN>
+  docker tag transcribe_audio <USER NAME>/transcribe_audio
+  docker push <USER NAME>/transcribe_audio
+  ```
+- **Before you push:**
+  - Only push images built **after** Step 25. If you ever pushed one with the key, delete that Docker Hub repository and tell the staff so the key can be rotated.
+  - Prefer `docker login -u <USER NAME>` and paste the token at the prompt; after `-p` it stays in your shell history (§6 G13).
+  - An image built on Apple Silicon is `linux/arm64` and won't run on an amd64 VM; build both with `docker buildx build --platform linux/amd64,linux/arm64 … --push` (§6 G6).
+- **Under the hood:** `docker tag` gives the local image a second name in your Docker Hub namespace; `docker push` uploads the layers that Docker Hub doesn't have yet. A new repository on Docker Hub is public by default.
+
+**Step 27. Clean up** *(extra; not in the README)*.
+- **Action** (`laptop/70-images-all.txt`, from the repo root after `cd ..`):
+  ```
+  $ docker image ls --filter reference=transcribe_audio --filter reference=generate_text --filter reference=synthesis_audio_en --filter reference=translate_text --filter reference=synthesis_audio
+  IMAGE                       ID             DISK USAGE   CONTENT SIZE   EXTRA
+  generate_text:latest        66b13d455fc8        846MB          212MB
+  synthesis_audio:latest      b56ca53bbd2d        842MB          216MB
+  synthesis_audio_en:latest   67635b572cbb        842MB          216MB
+  transcribe_audio:latest     42dc79356e2b       1.48GB          388MB
+  translate_text:latest       2c1279b01d87        845MB          216MB
+  ```
+- **Keep your work** (`laptop/71-git-status.txt`):
+  ```
+  $ git status
+  On branch main
+  Your branch is up to date with 'origin/main'.
+
+  Changes not staged for commit:
+  …
+  	modified:   generate_text/pyproject.toml
+  	modified:   transcribe_audio/cli.py
+
+  Untracked files:
+  …
+  	generate_text/Dockerfile
+  	generate_text/uv.lock
+  …
+  ```
+  The recording set `group_name` only in `transcribe_audio`; yours also lists the other `cli.py` files and, with your key, `generate_text`'s downloaded `text_prompts/` and `text_paragraphs/`. The other four folders' Dockerfiles, `pyproject.toml` and `uv.lock` don't appear at all: their `.gitignore` hides them (§6 G14). To keep them in your own repository, `git add -f` them; never stop ignoring `secrets/`.
+- **Action** (`laptop/72-cleanup.txt`, trimmed):
+  ```
+  $ docker image rm transcribe_audio generate_text synthesis_audio_en translate_text synthesis_audio
+  Untagged: transcribe_audio:latest
+  Deleted: sha256:42dc79356e2bb7a36092573b2883b11eae823ee2f215158736ee97d96978de97
+  Untagged: generate_text:latest
+  Deleted: sha256:66b13d455fc87701012c17ac772f0ba7f91170edc7b18fca9b84695d602de993
+  …
+  Untagged: synthesis_audio:latest
+  Deleted: sha256:b56ca53bbd2d4b62a0701ff537bc0baae57c7cc002b469a6c68eba656f1177b5
+  ```
+  Then `docker image prune -f` and `docker builder prune` (not captured): with the classic image store, older builds stay behind as untagged images, each holding the key; with the containerd image store, the old `COPY` layer stays in the build cache (§8 B5).
+- **Checkpoint:** no containers are left (every run used `--rm`); in GCP there is nothing to delete.
+
+---
