@@ -505,3 +505,554 @@ What changes since L02 (where one given `Dockerfile.txt` packaged one small CLI)
 - **Common misconception.** "Docker reads `.gitignore`." It doesn't. And the build's `SecretsUsedInArgOrEnv` warning doesn't catch this: it only flags the *name* of the variable on Dockerfile line 10, not the copied file.
 
 ---
+
+## 4. Step-by-step walkthrough
+
+Steps follow the README order: the main README (clone, key), then the five component READMEs, A → E (`README.md:114-120`). Commands in code spans are verbatim from the README unless marked *(extra)*. The video's top-left tracker numbers the README bullets (R1–R2, A1–A13, B1–B13, C1–C12, D1–D13, E1–E12, H1–H3 for the push, X1–X3 for the bonus); those numbers are given in brackets. Run every `docker` command **from inside the component folder**.
+
+**About the outputs below.** They are real, trimmed (first and last lines, with `…` between) from the 2026-10-13 captures in `assets/terminal/` (file names given with each block; `[exit N]` lines omitted, exit codes mentioned where they matter). What differs from your laptop:
+- The laptop was Debian 12 Linux (Python 3.11.2, user `student`). On macOS your prompt ends in `%` and Docker Desktop runs the containers; the commands are the same.
+- The builds ran with `--network host` and from a capture-only copy of the base image that adds the recording machine's network certificate and https apt sources (its line 1 named that copy; every other line was the README's). The blocks below leave out the lines that show this. Your first build pulls `docker.io/library/python:3.12-slim-bookworm`, and apt fetches from `http://deb.debian.org`.
+- Your terminal shows BuildKit's compact live view (`[+] Building …`, one row per step). Blocks of `#N …` lines are the same build's full log (what `--progress=plain` prints) and are labelled "full log".
+- After the first interactive session (`transcribe_audio/01-docker-run-tty.txt`), the in-container commands were piped into a container started like the README's `docker run`, so their files have no prompt; it is written in front of each command below as `app@…:/app$`. The part after `app@` is the container's id and differs on every run.
+- **No course key existed.** Every step that calls Google is described from the code and marked *expected*; the missing-key errors shown are real.
+- The recording laptop's folder belonged to uid 1000, the same uid as `app` in the image (§6 G7). The group name was set to `group-01`, the README's example.
+- Versions are those of 2026-10-13 (uv 0.13.0, pip 26.2.1, Python 3.12.15, CPython 3.15.0, the package versions); yours may be newer.
+
+### Part 0: before you start
+
+**Step 0. Docker and uv are ready** (`README.md:22-26`).
+- **Action:** start Docker Desktop. *(extra)* `docker version` checks that both the client and the engine answer (`laptop/01-docker-version.txt`):
+  ```
+  $ docker version
+  Client: Docker Engine - Community
+   Version:           29.8.2
+   API version:       1.56
+  …
+  Server: Docker Engine - Community
+   Engine:
+    Version:          29.8.2
+  …
+  ```
+  *(extra)* Pull the base image once (`laptop/02-base-image.txt`):
+  ```
+  $ docker pull python:3.12-slim-bookworm; docker run --rm python:3.12-slim-bookworm python --version
+  3.12-slim-bookworm: Pulling from library/python
+  Digest: sha256:34386ef0cb081344d7ec1c103ba398e6e9f64e9ab3a1509accc92a4e24a07258
+  Status: Image is up to date for python:3.12-slim-bookworm
+  docker.io/library/python:3.12-slim-bookworm
+  Python 3.12.15
+  ```
+- **Checkpoint:** `uv --version` prints a version (Tutorial 0). If it says `command not found`, Step 5 shows the README's installers.
+- **If it fails:** a client block followed by an error instead of a `Server:` block means the engine isn't running: start Docker Desktop and wait until it says it is running.
+
+### Part 1: the main README
+
+**Step 1. Clone** [R1] (`README.md:32-35`).
+```
+$ git clone https://github.com/dlops-io/mega-pipeline.git
+Cloning into 'mega-pipeline'...
+```
+(`laptop/03-clone.txt`)
+- **Under the hood:** this gets branch `main`: five component folders, each with `README.md`, `cli.py`, `secrets/.gitkeep` and (except `generate_text/`) a `.gitignore`.
+
+**Step 2. `cd mega-pipeline`, and look around** [R2] (`README.md:34`).
+- *(extra)* The files, the commit and the branch (`laptop/04-ls.txt`):
+  ```
+  $ ls; git log --oneline -1; git branch
+  README.md
+  generate_text
+  mega-pipeline-bucket.png
+  mega-pipeline-flow.png
+  synthesis_audio
+  synthesis_audio_en
+  transcribe_audio
+  translate_text
+  c6bbc9b fix for Google Speech-to-Text automatically breaks longer audio files into chunks separated by natural pauses.
+  * main
+  ```
+- *(extra)* All five folders (`laptop/05-ls-components.txt`, trimmed):
+  ```
+  $ ls -a transcribe_audio generate_text synthesis_audio_en translate_text synthesis_audio
+  generate_text:
+  .
+  ..
+  README.md
+  cli.py
+  main.py
+  pyproject.toml
+  secrets
+
+  synthesis_audio:
+  .
+  ..
+  .gitignore
+  README.md
+  cli.py
+  cli_11.py
+  secrets
+  …
+  transcribe_audio:
+  .
+  ..
+  .gitignore
+  README.md
+  cli.py
+  secrets
+  …
+  ```
+- **Checkpoint:** no `Dockerfile` in any folder ("none of them come with a `Dockerfile` already written", `README.md:114`). Remember two differences: `generate_text/` already has `pyproject.toml` and `main.py` but no `.gitignore` (Step 15), and `synthesis_audio/` has the bonus `cli_11.py` (Step 23).
+
+**Step 3. The key, into every component** (`README.md:90-106`).
+- **Action:** download `mega-pipeline.json` with the Canvas link at `README.md:99` (HarvardKey login) and put a copy inside each component's `secrets/` folder (`README.md:97`). The copy loop in the checklist is one way.
+- **Under the hood:** the file is the private key of a service account in the course's project: a robot Google identity your code acts as (3.6). Git ignores it (`.gitignore:4` at the root, `/secrets` in each component's `.gitignore`).
+- **Checkpoint:** `ls transcribe_audio/secrets` shows `mega-pipeline.json`, and `git status` stays clean.
+- **If it fails:**
+  - The code expects exactly `mega-pipeline.json` (`README.md:195`); browsers sometimes save `mega-pipeline (1).json`.
+  - The component READMEs link Canvas file `23163432` (e.g. `transcribe_audio/README.md:17`), the main README `25687801` (`README.md:99`, updated on lecture day). Use the main README's (§9 E5).
+- Never `cat` the key, paste it into a chat or commit it anywhere.
+
+### Part A: 📝 Task A · `transcribe_audio` (`transcribe_audio/README.md`)
+
+**Step 4. `cd transcribe_audio`; the key in `secrets/`** [A1, A2] (`:11-17`).
+- *(extra)* Check that the key is there and that Git ignores it. Recorded with an 82-byte stand-in file in place of the key, after Step 10's edit to `cli.py` (`laptop/20-g1-git-ignores-key.txt`):
+  ```
+  $ ls secrets; git status --short; git check-ignore -v secrets/mega-pipeline.json
+  mega-pipeline.json
+   M cli.py
+  transcribe_audio/.gitignore:3:/secrets	secrets/mega-pipeline.json
+  ```
+- **Under the hood:** `git check-ignore -v` names the rule that ignores a path: line 3 of this folder's `.gitignore`.
+
+**Step 5. `uv init --bare`** [A3] (`:19-34`).
+- **If uv is missing** (`:26-34`, "Don't have `uv` installed?"). The recording laptop had none (`laptop/06-uv-missing.txt`, `07-uv-install.txt`, `08-uv-version.txt`):
+  ```
+  $ uv --version
+  bash: line 1: uv: command not found
+  $ curl -LsSf https://astral.sh/uv/install.sh | sh
+  downloading uv 0.13.0 x86_64-unknown-linux-gnu
+  installing to /home/student/.local/bin
+    uv
+    uvx
+  everything's installed!
+
+  To add $HOME/.local/bin to your PATH, either restart your shell or run:
+
+      source $HOME/.local/bin/env (sh, bash, zsh)
+  …
+  ```
+  Then, in a **new** terminal, `cd` back into `transcribe_audio`:
+  ```
+  $ uv --version
+  uv 0.13.0 (x86_64-unknown-linux-gnu)
+  ```
+  On Windows use the PowerShell line (`:32`); `pip install uv` (`:34`) is the third option.
+- **Action** (`laptop/09-uv-init.txt`, `10-cat-pyproject.txt`):
+  ```
+  $ uv init --bare
+  Initialized project `transcribe-audio`
+  $ cat pyproject.toml
+  [project]
+  name = "transcribe-audio"
+  version = "0.1.0"
+  requires-python = ">=3.11"
+  dependencies = []
+  ```
+  (`cat` is *(extra)*.)
+- **Under the hood:** `--bare` writes only `pyproject.toml` (no `main.py`, no README, no `git init`). The project name comes from the folder name, with `_` turned into `-`. `requires-python` comes from the Python uv finds on **your laptop**: 3.11.2 here, hence `>=3.11`.
+- **Checkpoint:** `requires-python` is `>=3.12` or lower, so the image's Python 3.12 satisfies it. If yours says `>=3.13` or higher, change it to `requires-python = ">=3.12"` now (not in the README; §6 G3).
+- **If it fails:** `uv: command not found` right after installing means this shell's `PATH` predates `~/.local/bin`: open a new terminal, or run `source $HOME/.local/bin/env` as the installer says. `git status` won't list the new file: `transcribe_audio/.gitignore:6` ignores `pyproject.toml` (§6 G14).
+
+**Step 6. Write the Dockerfile** [A4] (`:36-92`).
+- **Action:** create a file named `Dockerfile` (no extension) in `transcribe_audio/`. The README gives the `FROM` line in its text ("base it from `python:3.12-slim-bookworm`", `:41`) and the rest as six code blocks (`:45`, `:50-55`, `:60-69`, `:76-77`, `:82-83`, `:88-89`). In order, with blank lines between them, that is the 30-line file the recording built (`files/transcribe_audio.Dockerfile`):
+  ```dockerfile
+  FROM python:3.12-slim-bookworm
+
+  ARG DEBIAN_PACKAGES="build-essential ffmpeg"
+
+  ENV DEBIAN_FRONTEND=noninteractive
+  ENV LANG=C.UTF-8
+  ENV PYTHONUNBUFFERED=1
+  ENV UV_LINK_MODE=copy
+  ENV UV_PROJECT_ENVIRONMENT=/home/app/.venv
+  ENV GOOGLE_APPLICATION_CREDENTIALS=secrets/mega-pipeline.json
+
+  RUN apt-get update && \
+      apt-get upgrade -y && \
+      apt-get install -y --no-install-recommends $DEBIAN_PACKAGES && \
+      apt-get clean && \
+      rm -rf /var/lib/apt/lists/* && \
+      pip install --no-cache-dir --upgrade pip && \
+      pip install uv && \
+      useradd -ms /bin/bash app -d /home/app -u 1000 && \
+      mkdir -p /app && \
+      chown app:app /app
+
+  USER app
+  WORKDIR /app
+
+  COPY --chown=app:app . ./
+  RUN uv sync
+
+  ENTRYPOINT ["/bin/bash"]
+  CMD ["-c", "source /home/app/.venv/bin/activate && exec bash"]
+  ```
+- **Under the hood:** §3.3 explains each line; §5 compares it with the appendix's sample. The line numbers above (3 = `ARG`, 9 = `UV_PROJECT_ENVIRONMENT`, 10 = `GOOGLE_APPLICATION_CREDENTIALS`, 26 = `COPY`, 27 = `uv sync`, 29 = `ENTRYPOINT`) are the ones Docker's warnings and errors refer to.
+- **Checkpoint** *(extra)* (`laptop/11-ls-before-build.txt`):
+  ```
+  $ ls -a; git status
+  .
+  ..
+  .gitignore
+  Dockerfile
+  README.md
+  cli.py
+  pyproject.toml
+  secrets
+  On branch main
+  Your branch is up to date with 'origin/main'.
+
+  nothing to commit, working tree clean
+  ```
+  The new `Dockerfile` and `pyproject.toml` are invisible to Git: `transcribe_audio/.gitignore:5-6` (§6 G14).
+- **If it fails:** an editor that adds `.txt` (Windows hides extensions) leaves you without a file named `Dockerfile`, and `docker build` can't find one. Don't paste the appendix's version unchanged: its `ARG` has `curl`, not `ffmpeg` (`README.md:179`; §6 G8).
+
+**Step 7. Build the image** [A5] (`:94-95`).
+- **Action:** the README says "Build your docker image and give your image the name `transcribe_audio`" and gives no command. The standard one, from `transcribe_audio/`:
+  ```bash
+  docker build -t transcribe_audio .
+  ```
+- **Captured** (the full log, trimmed; `laptop/12-build.txt`, 1,406 lines):
+  ```
+  #1 [internal] load build definition from Dockerfile
+  #1 WARN: SecretsUsedInArgOrEnv: Do not use ARG or ENV instructions for sensitive data (ENV "GOOGLE_APPLICATION_CREDENTIALS") (line 10)
+  …
+  #6 [internal] load build context
+  #6 transferring context: 11.84kB 0.0s done
+  …
+  #5 [2/5] RUN apt-get update &&     apt-get upgrade -y &&     apt-get install -y --no-install-recommends build-essential ffmpeg &&     apt-get clean && …
+  …
+  #5 6.775 0 upgraded, 237 newly installed, 0 to remove and 0 not upgraded.
+  #5 6.775 Need to get 205 MB of archives.
+  #5 6.775 After this operation, 786 MB of additional disk space will be used.
+  …
+  #5 33.48 update-alternatives: warning: skip creation of /usr/share/man/man1/lzma.1.gz because associated file /usr/share/man/man1/xz.1.gz (of link group lzma) doesn't exist
+  …
+  #5 41.72 Successfully installed pip-26.2.1
+  #5 41.73 WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, …
+  …
+  #5 46.08 Successfully installed uv-0.13.0
+  …
+  #5 DONE 46.9s
+
+  #7 [3/5] WORKDIR /app
+  #7 DONE 0.1s
+
+  #8 [4/5] COPY --chown=app:app . ./
+  #8 DONE 0.0s
+
+  #9 [5/5] RUN uv sync
+  #9 0.143 Using CPython 3.12.15 interpreter at: /usr/local/bin/python3
+  #9 0.143 Creating virtual environment at: /home/app/.venv
+  #9 0.147 Resolved 1 package in 2ms
+  #9 0.148 Checked in 0.00ms
+  #9 DONE 0.2s
+  …
+  #10 naming to docker.io/library/transcribe_audio:latest done
+  …
+   1 warning found (use docker --debug to expand):
+   - SecretsUsedInArgOrEnv: Do not use ARG or ENV instructions for sensitive data (ENV "GOOGLE_APPLICATION_CREDENTIALS") (line 10)
+  ```
+  *(extra)* (`laptop/13-images.txt`):
+  ```
+  $ docker images transcribe_audio
+  IMAGE                     ID             DISK USAGE   CONTENT SIZE   EXTRA
+  transcribe_audio:latest   1d55dcc2f1a2       1.35GB          357MB
+  ```
+- **Under the hood:**
+  - The `.` is the **build context**: the whole folder is sent to the builder (11.84 kB here), secrets included if they are there (§3.8).
+  - Five build steps: `[1/5] FROM` (your first build pulls the base image for your machine's architecture), `[2/5]` the one big `RUN` (237 apt packages, a 205 MB download, then pip and uv: 46.9 s), `[3/5] WORKDIR`, `[4/5] COPY`, `[5/5] RUN uv sync` with the image's own Python 3.12.15. `Resolved 1 package` is the project itself: nothing third-party yet.
+  - The ten `update-alternatives: warning: skip creation of /usr/share/man/man1/…` lines are harmless: slim images ship without man pages. The appendix's `for i in $(seq 1 8); do mkdir -p "/usr/share/man/man${i}"; done` (`README.md:200`) recreates those folders, which some packages' install scripts need.
+  - The `SecretsUsedInArgOrEnv` warning fires because the variable's *name* sounds secret. Its value is only a path, so it is harmless, and it appears on every build.
+- **Checkpoint:** `naming to docker.io/library/transcribe_audio:latest`, and `[5/5]` says `Using CPython 3.12.15 interpreter at: /usr/local/bin/python3`.
+- **If it fails:**
+  - Skipped Step 5 (captured with a copy of the folder without `pyproject.toml`, `laptop/26-g21-no-pyproject.txt`):
+    ```
+    #9 [5/5] RUN uv sync
+    #9 0.077 error: No `pyproject.toml` found in current directory or any parent directory
+    #9 ERROR: process "/bin/sh -c uv sync" did not complete successfully: exit code: 2
+    …
+    Dockerfile:27
+    --------------------
+      25 |     
+      26 |     COPY --chown=app:app . ./
+      27 | >>> RUN uv sync
+      28 |     
+      29 |     ENTRYPOINT ["/bin/bash"]
+    --------------------
+    ERROR: failed to build: failed to solve: process "/bin/sh -c uv sync" did not complete successfully: exit code: 2
+    ```
+    Run `uv init --bare` in this folder and build again (§6 G21).
+  - `Downloading cpython-…` / `Using CPython 3.1x.x` (anything but 3.12.15) in `[5/5]` means `requires-python` is above 3.12 (§6 G3).
+
+**Step 8. Run the container** [A6] (`:97-102`).
+- **Captured in a real terminal** (`transcribe_audio/01-docker-run-tty.txt`; all commands after the prompt are *(extra)* checks):
+  ```
+  $ docker run --rm -ti -v "$(pwd):/app" transcribe_audio
+  app@5b4d4981ec25:/app$ which python
+  /home/app/.venv/bin/python
+  app@5b4d4981ec25:/app$ python --version
+  Python 3.12.15
+  app@5b4d4981ec25:/app$ ls -a
+  .  ..  .gitignore  Dockerfile  README.md  cli.py  pyproject.toml  secrets
+  app@5b4d4981ec25:/app$ echo $GOOGLE_APPLICATION_CREDENTIALS
+  secrets/mega-pipeline.json
+  app@5b4d4981ec25:/app$ python cli.py --help
+  Traceback (most recent call last):
+    File "/app/cli.py", line 9, in <module>
+      from google.cloud import storage
+  ModuleNotFoundError: No module named 'google'
+  app@5b4d4981ec25:/app$ exit
+  exit
+  ```
+- **Under the hood:**
+  - `-ti` gives an interactive terminal; `--rm` deletes the container (and its writable layer) on exit; `-v "$(pwd):/app"` lays your current folder over the image's `/app` (3.4). The README: "when you change a source code file using VSCode from your host machine, the files are automatically changed inside the container" (`:102`).
+  - The container runs `/bin/bash -c "source /home/app/.venv/bin/activate && exec bash"`: activate, then replace itself with an interactive bash. That bash reads `/home/app/.bashrc`, which resets the prompt, so you see `app@<id>:/app$` without a `(transcribe-audio)` prefix; the venv is still active (`which python`).
+  - `ls -a` shows your laptop's files. `python cli.py --help` fails because the Google packages aren't installed yet: that is Step 9.
+- **Checkpoint:** the prompt `app@<id>:/app$` and `which python` → `/home/app/.venv/bin/python`.
+- **If it fails:**
+  - Windows: run it in Git BASH, keep the quotes around `$(pwd)`, and if Docker says `the input device is not a TTY`, put `winpty` in front (`README.md:227-236`).
+  - `/app` looks empty or shows the whole repo: you ran `docker run` from the wrong folder. `"$(pwd)"` must be the component folder.
+
+**Step 9. `uv add` the packages, inside the container** [A7] (`:104-110`).
+- **Action:** the README lists `google-cloud-storage`, `google-cloud-speech` and `ffmpeg-python` under "`uv add` the following" (`:105-108`); one command adds all three (`transcribe_audio/02-uv-add.txt`):
+  ```
+  app@…:/app$ uv add google-cloud-storage google-cloud-speech ffmpeg-python
+  Resolved 27 packages in 1.07s
+  Downloading cryptography (4.5MiB)
+  Downloading grpcio (6.8MiB)
+   Downloaded cryptography
+   Downloaded grpcio
+  Prepared 26 packages in 920ms
+  Installed 26 packages in 99ms
+   + certifi==2026.7.22
+   + cffi==2.1.1
+  …
+   + ffmpeg-python==0.2.0
+  …
+   + google-cloud-speech==2.41.0
+   + google-cloud-storage==3.17.0
+  …
+   + urllib3==2.8.0
+  ```
+- *(extra)* Where everything landed (`transcribe_audio/03-cat-pyproject.txt`, `04-ls.txt`, `09-uv-tree.txt`, `10-venv-where.txt`):
+  ```
+  app@…:/app$ cat pyproject.toml
+  [project]
+  name = "transcribe-audio"
+  version = "0.1.0"
+  requires-python = ">=3.11"
+  dependencies = [
+      "ffmpeg-python>=0.2.0",
+      "google-cloud-speech>=2.41.0",
+      "google-cloud-storage>=3.17.0",
+  ]
+  app@…:/app$ ls -la
+  total 176
+  drwxr-xr-x 3 app  app    4096 Oct 13 01:47 .
+  drwxr-xr-x 1 root root   4096 Oct 13 01:47 ..
+  -rw-r--r-- 1 app  app     104 Oct 13 01:42 .gitignore
+  -rw-r--r-- 1 app  app     801 Oct 13 01:42 Dockerfile
+  -rw-r--r-- 1 app  app    6161 Oct 13 01:42 README.md
+  -rw-r--r-- 1 app  app    4417 Oct 13 01:47 cli.py
+  -rw-r--r-- 1 app  app     199 Oct 13 01:47 pyproject.toml
+  drwxr-xr-x 2 app  app    4096 Oct 13 01:45 secrets
+  -rw-r--r-- 1 app  app  138445 Oct 13 01:47 uv.lock
+  app@…:/app$ uv tree --depth 1
+  Resolved 27 packages in 1ms
+  transcribe-audio v0.1.0
+  ├── ffmpeg-python v0.2.0
+  ├── google-cloud-speech v2.41.0
+  └── google-cloud-storage v3.17.0
+  app@…:/app$ which python; echo $VIRTUAL_ENV; ls /home/app/.venv/lib/python3.12/site-packages | head -5
+  /home/app/.venv/bin/python
+  /home/app/.venv
+  __pycache__
+  _cffi_backend.cpython-312-x86_64-linux-gnu.so
+  certifi
+  certifi-2026.7.22.dist-info
+  cffi
+  ```
+- **Under the hood:** three packages asked for, 26 installed: each brings its own dependencies (`grpcio`, `protobuf`, `google-auth`, `requests` …), and `Resolved 27` counts the project too. The list (`pyproject.toml`, each with a lower bound) and the receipt (`uv.lock`, 138,445 bytes) are written under `/app`, i.e. **into your laptop's folder**. The 26 packages went into `/home/app/.venv`, on the container's throwaway layer (3.4).
+- **Checkpoint:** on your laptop, `pyproject.toml` lists three dependencies and `uv.lock` exists.
+- **If it fails:**
+  - On a Linux laptop whose component folder isn't owned by uid 1000 (captured with a root-owned copy, `transcribe_audio/13-g7-root-owned.txt`):
+    ```
+    app@…:/app$ ls -ld /app; id; uv add requests
+    drwxr-xr-x 5 root root 4096 Oct 13 01:48 /app
+    uid=1000(app) gid=1000(app) groups=1000(app)
+    error: failed to create file `/app/pyproject.toml`: Permission denied (os error 13)
+    ```
+    Fix on the laptop: `sudo chown -R 1000:1000 .` in the component folder (§6 G7). Docker Desktop on macOS and Windows handles ownership for you.
+  - The package is `ffmpeg-python`. `uv add ffmpeg` installs a different project, and `cli.py` then fails with `AttributeError: module 'ffmpeg' has no attribute 'input'` (§6 G9).
+- The README adds: "After exiting the container, re-build the image so the dependencies are baked in for future runs" (`:110`). That is Step 14.
+
+**Step 10. Set your group name; check the CLI** [A8, A9] (`:112-127`).
+- **Action:** on your laptop, in VS Code, change line 21 of `cli.py`, `group_name = "pavlos"`, to your team's name (`:114`). The README warns: "get it wrong and your work lands under the wrong team, or overwrites someone else's" (`README.md:124`).
+- *(extra)* The container sees the edit at once, through the mount (`transcribe_audio/06-group-name.txt`):
+  ```
+  app@…:/app$ grep -n "^group_name" cli.py
+  21:group_name = "group-01" # This needs to be your Group name e.g: group-01, group-02, group-03, group-04, group-05, ...
+  ```
+- **Action** [A9] (`transcribe_audio/05-help.txt`):
+  ```
+  app@…:/app$ python cli.py --help
+  usage: cli.py [-h] [-d] [-t] [-u]
+
+  Transcribe audio file to text
+
+  options:
+    -h, --help        show this help message and exit
+    -d, --download    Download audio files from GCS bucket
+    -t, --transcribe  Transcribe audio files to text
+    -u, --upload      Upload transcribed text to GCS bucket
+  ```
+- **Checkpoint:** identical, line for line, to the README's block (`:117-127`). A's `--help` needs no key: its clients are created inside the functions.
+- Use **the same** group name in all five `cli.py` files (and `cli_11.py` for the bonus): each stage downloads `<prefix>/<group_name>/…`, written by the stage before (§6 G2).
+
+**Step 11. Download** [A10] (`:131`; `README.md:134`).
+- **Action:** `python cli.py -d`, or in long form `python cli.py --download`, with your key in `secrets/`.
+- **Recorded without the key** (`transcribe_audio/07-download.txt`; this is what a missing or misplaced key looks like):
+  ```
+  app@…:/app$ python cli.py --download
+  Args: Namespace(download=True, transcribe=False, upload=False)
+  download
+  Traceback (most recent call last):
+    File "/app/cli.py", line 154, in <module>
+      main(args)
+    File "/app/cli.py", line 122, in main
+      download()
+    File "/app/cli.py", line 36, in download
+      client = storage.Client()
+               ^^^^^^^^^^^^^^^^
+  …
+    File "/home/app/.venv/lib/python3.12/site-packages/google/cloud/_helpers/__init__.py", line 170, in _determine_default_project
+      _, project = google.auth.default()
+                   ^^^^^^^^^^^^^^^^^^^^^
+  …
+    File "/home/app/.venv/lib/python3.12/site-packages/google/auth/_default.py", line 178, in load_credentials_from_file
+      raise exceptions.DefaultCredentialsError(
+  google.auth.exceptions.DefaultCredentialsError: File secrets/mega-pipeline.json was not found.
+  ```
+  Read it from the top: your code (line 36) built a storage client; the client asked `google.auth.default()` for credentials; that function looked for the file `GOOGLE_APPLICATION_CREDENTIALS` names, relative to `/app`, and didn't find it (3.6). Even this failed run left two empty folders on your laptop, `input_audios/` and `text_prompts/group-01/` (`transcribe_audio/08-ls-after-download.txt`): `makedirs()` runs before the client is built.
+- **Under the hood** (`transcribe_audio/cli.py:29-43`): delete the local `input_audios/`, recreate it and `text_prompts/<group>/`, `storage.Client()` (ADC), `get_bucket("mega-pipeline-bucket")`, list every object under `input_audios/` (shared by all groups), skip the zero-byte "folder" object, and download each file to the same relative path.
+- **Expected with your key** (from the code; not recorded): `Args: …`, `download`, then one line per object name (`print(blob.name)`, line 41), such as `input_audios/input-….mp3`; the recordings appear in `input_audios/` on your laptop.
+- **If it fails:** `DefaultCredentialsError: File secrets/mega-pipeline.json was not found.` has three usual causes: the key isn't in *this* component's `secrets/`, you `cd`'d away from `/app`, or you ran `docker run` from the wrong laptop folder (§6 G5). A `403 … does not have storage.buckets.get access` would mean the key lacks rights on the bucket: ask the staff.
+
+**Step 12. Transcribe** [A11] (`:132`; `README.md:135`).
+- **Action:** `python cli.py -t` / `python cli.py --transcribe`, with your key.
+- **Under the hood** (`transcribe_audio/cli.py:46-96`), for each file in `input_audios/`:
+  1. the `uuid` is the file name without `.mp3`;
+  2. skip it if `text_prompts/<group>/<uuid>.txt` already exists (`:61-62`);
+  3. convert MP3 to FLAC with ffmpeg in a temporary folder (`:65-69`);
+  4. send the bytes inline to `long_running_recognize` with `language_code="en-US"` and wait up to 90 s (`:75-78`);
+  5. join the transcript of every result segment (`:84-91`; the `c6bbc9b` fix: long audio comes back in several pieces) and write the `.txt` (`:95-96`).
+- **Expected with your key** (from the code; not recorded): `transcribe`, `Transcribing: input_audios/input-….mp3`, ffmpeg's log, `response: results { alternatives { transcript: "…" …`, then the joined transcript.
+- **Checkpoint:** open `text_prompts/<group>/input-….txt` on your laptop: words, not the literal `None` (§6 G20).
+- **If it fails:** `FileNotFoundError: [Errno 2] No such file or directory: 'ffmpeg'` means the `ffmpeg` program isn't in the image (line 3, §6 G8); `ModuleNotFoundError: No module named 'ffmpeg'` means Step 9 was skipped or the image was never rebuilt (§6 G10); an `ffmpeg.Error` on a file that isn't audio means a stray file such as `.DS_Store` in `input_audios/` (§6 G17).
+
+**Step 13. Upload** [A12] (`:133`; `README.md:136`).
+- **Action:** `python cli.py -u` / `python cli.py --upload`, with your key.
+- **Under the hood** (`transcribe_audio/cli.py:99-115`): glob `text_prompts/<group>/input-*.txt` and upload each file under the identical object name; `upload_from_filename` overwrites an existing object of that name.
+- **Expected with your key** (from the code): `upload`, then `Uploading: text_prompts/<group>/input-….txt text_prompts/<group>/input-….txt` per file.
+- **Checkpoint:** your group's transcribe cell lights up on the [leaderboard](http://ac215-mega-pipeline.dlops.io/) (`:134`).
+- **Tip:** the flags combine: `python cli.py -d -t -u` runs all three, in that order (`transcribe_audio/cli.py:121-126`).
+
+**Step 14. Exit, and bake the packages in** [A13] (`:110`).
+- **Action:** `exit`. `--rm` removes the container and its throwaway layer, and the 26 packages with it.
+- *(extra)* Back on the laptop, everything written under `/app` survived (`laptop/14-host-after-uv-add.txt`, trimmed):
+  ```
+  $ ls -a; cat pyproject.toml; head -c 300 uv.lock; echo; wc -c uv.lock; git status --short
+  .
+  ..
+  .gitignore
+  Dockerfile
+  README.md
+  cli.py
+  input_audios
+  pyproject.toml
+  secrets
+  text_prompts
+  uv.lock
+  [project]
+  name = "transcribe-audio"
+  …
+  version = 1
+  revision = 5
+  requires-python = ">=3.11"
+  resolution-markers = [
+      "python_full_version >= '3.14'",
+      "python_full_version < '3.14'",
+  ]
+  …
+  138445 uv.lock
+   M cli.py
+  ```
+  `git status` shows only `cli.py`: the `.gitignore` hides the rest (§6 G14).
+- *(extra)* **The trap.** A new container from the image built in Step 7 (`transcribe_audio/11-g10-new-container.txt`):
+  ```
+  app@…:/app$ python cli.py --help
+  Traceback (most recent call last):
+    File "/app/cli.py", line 9, in <module>
+      from google.cloud import storage
+  ModuleNotFoundError: No module named 'google'
+  ```
+  The packages lived only in the old container (§6 G10).
+- **Action:** rebuild with the same command. Captured live view (`laptop/15-rebuild.txt`, trimmed):
+  ```
+  $ docker build -t transcribe_audio .
+  [+] Building 9.9s (10/10) FINISHED                               docker:default
+   => [internal] load build definition from Dockerfile                       0.0s
+  …
+   => => transferring context: 143.47kB                                      0.0s
+   => CACHED [2/5] RUN apt-get update &&     apt-get upgrade -y &&     apt-  0.0s
+   => CACHED [3/5] WORKDIR /app                                              0.0s
+   => [4/5] COPY --chown=app:app . ./                                        0.0s
+   => [5/5] RUN uv sync                                                      2.9s
+   => exporting to image                                                     6.8s
+  …
+  ```
+  The same build's full log (`laptop/15-rebuild.plain.txt`): `Using CPython 3.12.15 interpreter at: /usr/local/bin/python3`, `Resolved 27 packages in 1ms`, `Prepared 26 packages in 2.47s`, `Installed 26 packages in 174ms`.
+- **Under the hood:** build steps 2 and 3 come from the cache. Build step 4 copies the changed folder (`cli.py`, the new `pyproject.toml` and `uv.lock`, the downloaded folders), so step 5 runs again, and `uv sync` installs exactly the locked versions into the image.
+- *(extra)* (`laptop/16-images-after.txt`, `17-history.txt`; the history's rows below `ARG` belong to the base image and are cut):
+  ```
+  $ docker images transcribe_audio
+  IMAGE                     ID             DISK USAGE   CONTENT SIZE   EXTRA
+  transcribe_audio:latest   55af020104ea       1.48GB          388MB
+  $ docker history transcribe_audio
+  IMAGE          CREATED          CREATED BY                                      SIZE      COMMENT
+  55af020104ea   8 seconds ago    CMD ["-c" "source /home/app/.venv/bin/activa…   0B        buildkit.dockerfile.v0
+  <missing>      8 seconds ago    ENTRYPOINT ["/bin/bash"]                        0B        buildkit.dockerfile.v0
+  <missing>      8 seconds ago    RUN |1 DEBIAN_PACKAGES=build-essential ffmpe…   105MB     buildkit.dockerfile.v0
+  <missing>      11 seconds ago   COPY --chown=app:app . ./ # buildkit            193kB     buildkit.dockerfile.v0
+  <missing>      4 minutes ago    WORKDIR /app                                    4.1kB     buildkit.dockerfile.v0
+  <missing>      4 minutes ago    USER app                                        0B        buildkit.dockerfile.v0
+  <missing>      4 minutes ago    RUN |1 DEBIAN_PACKAGES=build-essential ffmpe…   842MB     buildkit.dockerfile.v0
+  <missing>      4 minutes ago    ENV GOOGLE_APPLICATION_CREDENTIALS=secrets/m…   0B        buildkit.dockerfile.v0
+  <missing>      4 minutes ago    ENV UV_PROJECT_ENVIRONMENT=/home/app/.venv      0B        buildkit.dockerfile.v0
+  <missing>      4 minutes ago    ENV UV_LINK_MODE=copy                           0B        buildkit.dockerfile.v0
+  <missing>      4 minutes ago    ENV PYTHONUNBUFFERED=1                          0B        buildkit.dockerfile.v0
+  <missing>      4 minutes ago    ENV LANG=C.UTF-8                                0B        buildkit.dockerfile.v0
+  <missing>      4 minutes ago    ENV DEBIAN_FRONTEND=noninteractive              0B        buildkit.dockerfile.v0
+  <missing>      4 minutes ago    ARG DEBIAN_PACKAGES=build-essential ffmpeg      0B        buildkit.dockerfile.v0
+  …
+  ```
+  One row per instruction, newest first. Metadata rows are `0B`; the apt `RUN` is 842 MB of compilers, ffmpeg and their libraries; the `uv sync` layer is 105 MB (the packages plus uv's download cache, §8 B4).
+- **Checkpoint** *(extra)*, in a container of the rebuilt image (`transcribe_audio/12-after-rebuild.txt`):
+  ```
+  app@…:/app$ python -c "import google.cloud.storage, google.cloud.speech, ffmpeg; print(\"imports ok\")"; uv --version; python --version
+  imports ok
+  uv 0.13.0 (x86_64-unknown-linux-gnu)
+  Python 3.12.15
+  ```
+- Because `COPY . ./` comes before `RUN uv sync`, every later edit in the folder, even the group name, re-runs `uv sync` on the next build (3.3, §8 B3).
