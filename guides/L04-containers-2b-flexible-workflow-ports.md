@@ -417,7 +417,7 @@ You write no Dockerfile this time. You read them, configure three variables per 
 4. **Download a JSON key.** Save it **exactly** as `<your-workspace>/secrets/mega-pipeline.json`, one level *above* the repo (`mega-pipeline/README.md:105-119`, `:183`).
    - The scripts compute this path as `SECRETS_DIR=$(pwd)/../../secrets/` from inside a component folder (`mega-pipeline/transcribe_audio/docker-shell.sh:9`).
    - They mount it at `/secrets` (`:94`) and pass `-e GOOGLE_APPLICATION_CREDENTIALS=/secrets/mega-pipeline.json` (`:10`, `:95`).
-   - Example: if you cloned into `/Users/conny/Desktop/AC215/mega-pipeline`, the key must be at `/Users/conny/Desktop/AC215/secrets/mega-pipeline.json`.
+   - Example: if you cloned into `~/Desktop/AC215/mega-pipeline`, the key must be at `~/Desktop/AC215/secrets/mega-pipeline.json`.
    - The same `AC215/secrets/` folder is also where `llm-rag` (L05) and `cheese-app-v0` (L10) look for their keys: `llm-rag/docker-compose.yml:11` mounts `../secrets:/secrets`, and `cheese-app-v0/api-service/docker-shell.sh:8` uses `$(pwd)/../../secrets/`.
 5. **Your own GCS bucket, seeded with input audio.** The README says you own one (`mega-pipeline/README.md:62`, `:150`), but it gives **no command** to create it or to fill `input_audios/` (Errata E5). Not in the README, but standard:
    ```bash

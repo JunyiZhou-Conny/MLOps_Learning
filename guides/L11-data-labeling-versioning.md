@@ -418,7 +418,7 @@ PART B — data-versioning
 Both repos use the **same key file name**. If you clone both into one parent folder, one `secrets/` folder serves both:
 
 ```text
-/Users/conny/Desktop/AC215/
+~/Desktop/AC215/
 ├── secrets/data-service-account.json     ← never inside a git repo
 ├── data-labeling/                        ← git clone https://github.com/dlops-io/data-labeling
 └── data-versioning/                      ← your own repo, started from the ac215 branch

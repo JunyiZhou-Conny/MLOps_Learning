@@ -265,7 +265,7 @@ Who calls whom:
 - Suggested local layout. The `secrets/` folder sits **next to** the repos, so every repo's `../../secrets` (or `../secrets`) lands in the same place:
 
 ```text
-/Users/conny/Desktop/AC215/
+~/Desktop/AC215/
 ├── cheese-app-v0/            ← git clone https://github.com/dlops-io/cheese-app-v0
 │   ├── llm-rag/
 │   ├── api-service/

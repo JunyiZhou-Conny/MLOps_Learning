@@ -61,7 +61,7 @@ Commands in backticks are exactly as the README (or, for the guest lecture, `wal
 ### Before the README *(extra)*
 
 *Get the code* (§4 A0; the README only says "Clone or download from your repository", README:20)
-- [ ] `cd /Users/conny/Desktop/AC215` — *(extra)* your course folder. Keep each course repo as its own clone here, not inside another git repo (G12).
+- [ ] `cd ~/Desktop/AC215` — *(extra)* your course folder. Keep each course repo as its own clone here, not inside another git repo (G12).
 - [ ] `git clone https://github.com/dlops-io/cheese-app-ci-cd.git` — *(extra)* the URL comes from the course site (`tutorials_demo.md:131`).
 - [ ] `cd cheese-app-ci-cd` — *(extra)*
 - [ ] `git log -1 --format='%H %ci'` — *(extra)* expect `b8458ff0cc1898700b32a873b4665f43f50df71e 2025-11-13 ...`.
@@ -318,7 +318,7 @@ All three run inside the same Docker image that serves the app. You then add a *
 The guest lecture's `babykev` shows the same gate on a real ML project, with no Docker until the last step. There `uv` pins the environment, `just` gives each task one name, and the hook runs one command, `just check`: format check, lint, type check, tests with a coverage floor, docs check and config linting. It also shows why a fully green gate can still let a wrong model through.
 
 ```
- YOUR LAPTOP  (e.g. /Users/conny/Desktop/AC215/cheese-app-ci-cd, a git clone)
+ YOUR LAPTOP  (e.g. ~/Desktop/AC215/cheese-app-ci-cd, a git clone)
  ┌───────────────────────────────────────────────────────────────────────────────────────┐
  │  working tree ──git commit──► .git/hooks/pre-commit (written by `pre-commit install`) │
  │       │                              │ reads .pre-commit-config.yaml                  │
@@ -532,7 +532,7 @@ Commands copied from the README are marked **(README:line)**. Commands this guid
 **A0. Get the code.**
 - The README only says "Clone or download from your repository" (README:20). The URL comes from `tutorials_demo.md`. *(suggested, not in README)*:
   ```bash
-  cd /Users/conny/Desktop/AC215
+  cd ~/Desktop/AC215
   git clone https://github.com/dlops-io/cheese-app-ci-cd.git
   cd cheese-app-ci-cd
   git log -1 --format='%H %ci'      # expect b8458ff0cc1898700b32a873b4665f43f50df71e 2025-11-13 ...

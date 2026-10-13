@@ -25,7 +25,7 @@
 **Prerequisites.**
 - A GCP project with billing enabled, and its project ID. The README commands and `src/deployment/docker-shell.sh:13` hard-code the instructor's `ac215-project`.
 - Docker Desktop and `git`. Everything else (gcloud, kubectl 1.34, Helm, Pulumi, `gke-gcloud-auth-plugin`, uv) lives in the L20 deployment container.
-- From L20: the `deployment` service account and its key at `secrets/deployment.json`, **next to** the repo folder. With a clone at `/Users/conny/Desktop/AC215/cheese-app-v3`, the deployment container looks for secrets in `/Users/conny/Desktop/AC215/secrets/` (three levels up from `src/deployment`, `src/deployment/docker-shell.sh:9`). The `gcp-service` account must exist too, but only its e-mail is used here.
+- From L20: the `deployment` service account and its key at `secrets/deployment.json`, **next to** the repo folder. With a clone at `~/Desktop/AC215/cheese-app-v3`, the deployment container looks for secrets in `~/Desktop/AC215/secrets/` (three levels up from `src/deployment`, `src/deployment/docker-shell.sh:9`). The `gcp-service` account must exist too, but only its e-mail is used here.
 - APIs: Compute Engine, Service Usage, Cloud Resource Manager, Artifact Registry, **Kubernetes Engine**, plus **Vertex AI** for the running app (§2).
 - One IAM grant the README does not list: `deployment` needs permission to edit `gcp-service`'s IAM policy (§2).
 - Background: containers and ports (L2–L4), service accounts (L10), the app itself (L18), and the deployment toolbox, the `deploy_images` stack and the single-VM deployment (L20).
@@ -73,7 +73,7 @@ Commands in backticks are exactly as the README writes them (placeholders kept; 
 
 - [ ] `git clone https://github.com/dlops-io/cheese-app-v3.git` — *(extra)* get the code (skip if you kept your L20 clone). If you use this workspace's `tools/sync_tutorials.py`, the clone is `tutorials/cheese-app-v3`.
 - [ ] `git -C cheese-app-v3 rev-parse HEAD` — *(extra)* compare with `3ecef56fea879ac480d260c0906cd95baf05179a`; a different hash means the repo has changed since this guide was made.
-- [ ] *(extra)* Check that `deployment.json` is in the `secrets/` folder **next to** the repo folder (`/Users/conny/Desktop/AC215/secrets/` for a clone at `/Users/conny/Desktop/AC215/cheese-app-v3`).
+- [ ] *(extra)* Check that `deployment.json` is in the `secrets/` folder **next to** the repo folder (`~/Desktop/AC215/secrets/` for a clone at `~/Desktop/AC215/cheese-app-v3`).
 
 ### Create Simple Kubernetes Cluster Tutorial *(optional warm-up, README lines 517–581)*
 
@@ -307,7 +307,7 @@ The app ends up at `http://<LB-IP>.sslip.io`, a free wildcard DNS name that reso
 - **Docker Desktop** and `git`. All other tools (gcloud, kubectl, helm, Pulumi, `gke-gcloud-auth-plugin`, uv) live inside the deployment container (`src/deployment/Dockerfile:30`, `:33-41`, `:44`, `:47`, `:54`).
 - Expected folder layout:
   ```
-  /Users/conny/Desktop/AC215/
+  ~/Desktop/AC215/
   ├── cheese-app-v3/          # git clone
   └── secrets/
       └── deployment.json     # needed by L22
@@ -537,7 +537,7 @@ gcloud container clusters delete test-cluster --zone us-east1-c
 **Step 1. Enable the APIs.** README 396–402. Add Vertex AI API if it is not already on (§2).
 
 **Step 2. Service accounts and the extra role.**
-- README 236–259 creates `deployment` and `gcp-service`. Put `deployment.json` in `/Users/conny/Desktop/AC215/secrets/`.
+- README 236–259 creates `deployment` and `gcp-service`. Put `deployment.json` in `~/Desktop/AC215/secrets/`.
 - Grant the extra role from §2 so Pulumi can write the Workload Identity binding.
 - Checkpoint: in the console under IAM → Service accounts → `gcp-service` → Permissions, `deployment@…` appears with Service Account Admin (or deployment has it project-wide).
 
