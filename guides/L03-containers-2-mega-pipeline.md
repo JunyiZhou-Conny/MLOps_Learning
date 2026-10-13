@@ -414,3 +414,94 @@ What changes since L02 (where one given `Dockerfile.txt` packaged one small CLI)
   No containers are left behind: every run uses `--rm`. `python:3.12-slim-bookworm` stays; remove it with `docker image rm python:3.12-slim-bookworm` if you don't need it (L04 uses `python:3.14-slim-bookworm`).
 
 ---
+
+## 3. Concepts this tutorial teaches
+
+### 3.1 A pipeline of independent stages joined by shared storage ("the bucket is the message bus")
+- **Explanation.** Each stage is a separate program in a separate container with one job. It doesn't know who produced its input or who will consume its output; all it knows is a **naming contract**, for example "I read `text_paragraphs/<group>/input-*.txt` and I write `text_translated/<group>/input-*.txt`" (`translate_text/cli.py:37`, `:81-85`). Because the contract is "files in a bucket" rather than "function calls", you can rerun, swap or replace one stage without touching the others. The README presents it as a stand-in for the API-based microservices that come later (`README.md:60-67`).
+- **Mental model.** A relay race where the runners never meet. Each runner drops the baton in a numbered locker (a prefix), and the next runner opens that locker whenever they arrive. The pipeline's whole "wiring" is the table of prefixes in §1.
+- **Analogy.** A restaurant kitchen's pass: the grill cook puts the plate on the pass and the expediter picks it up; neither waits on the other's phone call.
+- **Common misconception.** "The containers form a pipeline, so starting one triggers the next." Nothing triggers anything: you run each container, and each verb (`--download`, `--transcribe`, `--upload`), by hand. Running the whole pipeline with one command is what Milestone 2 asks of your project ("runnable with one command (e.g., `docker compose up` or `make run`)", `milestone2.md:46-48`).
+
+### 3.2 Namespacing a shared bucket: prefixes, `group_name`, "folders that aren't folders"
+- **Explanation.** Cloud Storage is a flat key → bytes store. `text_prompts/group-01/input-1.txt` is one object name; the "folders" in the console are only a view of the `/`-separated prefixes. Each `cli.py` builds names with `os.path.join(<prefix>, group_name, filename)` (e.g. `transcribe_audio/cli.py:112`) and lists objects by prefix (`transcribe_audio/cli.py:39`) or by glob (`generate_text/cli.py:42`, `match_glob=f"{text_prompts}/{group_name}/input-*.txt"`). `group_name` is the only thing that keeps the teams apart in one bucket.
+  - `input_audios/` has **no** group segment: every team transcribes the same recordings (`transcribe_audio/cli.py:39`).
+  - The file name is part of the contract too: uploads and downloads only match `input-*.txt` (`transcribe_audio/cli.py:108`, `generate_text/cli.py:42`). A file with another name is silently never handed on (§8 D2).
+- **Mental model.** One giant shared drive where everyone agreed to save inside a folder named after their team.
+- **Analogy.** Shared office mailboxes: one cabinet, one slot per team label.
+- **Common misconception.** "If I forget to set `group_name`, I'll get an error." On `main` the default is `"pavlos"` with no guard (`transcribe_audio/cli.py:21`), so your `--upload` silently writes into (and overwrites) the instructor's namespace. Last year's `solution` branch asserted that the name had been changed, and L04's `flexible-workflow` brings an `assert` back (`flexible-workflow:README.md:134`). The README only warns: "Double-check before every run." (`README.md:124`).
+
+### 3.3 A Dockerfile, line by line, and image layers
+- **Explanation.** Each instruction produces either a filesystem layer (`RUN`, `COPY`, `WORKDIR`) or only metadata (`ENV`, `ARG`, `USER`, `ENTRYPOINT`, `CMD`); the captured `docker history transcribe_audio` shows `0B` for every metadata row. The component Dockerfile (`transcribe_audio/README.md:41-90`, assembled in §5):
+  1. `FROM python:3.12-slim-bookworm`: Debian 12 with CPython 3.12 already installed in `/usr/local` (Python 3.12.15 at the time of recording).
+  2. `ARG DEBIAN_PACKAGES="build-essential ffmpeg"`: the OS packages, as a build-time variable. `ffmpeg` is needed only by A.
+  3. Six `ENV`s:
+     - `DEBIAN_FRONTEND=noninteractive`: apt never prompts.
+     - `LANG=C.UTF-8`: a UTF-8 locale.
+     - `PYTHONUNBUFFERED=1`: `print()` output appears at once (useful while a 300 s Text-to-Speech request runs).
+     - `UV_LINK_MODE=copy`: uv copies package files from its cache into the venv instead of hard-linking them. Hard links only fail (uv then warns and falls back to copying) when cache and venv are on different filesystems, e.g. with a BuildKit cache mount. Here both live under `/home/app`, so the line is a harmless default (the digest's fact-check: with the variable unset, a `uv sync --reinstall` hard-linked 26 packages with no warning).
+     - `UV_PROJECT_ENVIRONMENT=/home/app/.venv`: build the venv **outside** `/app` (3.4).
+     - `GOOGLE_APPLICATION_CREDENTIALS=secrets/mega-pipeline.json` (3.6).
+  4. One big `RUN … && …`: update apt, install the packages, `apt-get clean` and delete `/var/lib/apt/lists/*` **in the same layer** (so the package index never takes space in the image), upgrade pip, `pip install uv`, create user `app` (uid 1000, home `/home/app`) and a folder `/app` it owns. Plain `pip install` works here because the official Python image's interpreter is not marked "externally managed", unlike Debian's system Python in L01; pip prints a harmless `WARNING: Running pip as the 'root' user …`.
+  5. `USER app`, `WORKDIR /app`.
+  6. `COPY --chown=app:app . ./`, then `RUN uv sync`, which builds `/home/app/.venv` from `pyproject.toml` (and `uv.lock`, once there is one).
+  7. `ENTRYPOINT ["/bin/bash"]` + `CMD ["-c", "source /home/app/.venv/bin/activate && exec bash"]`: the container starts as an interactive bash with the venv active.
+- **Mental model.** An image is a stack of transparent sheets, each recording only what its step changed. Docker caches each sheet, keyed by the instruction, everything below it and the files it consumed. Change something and every sheet **above** it is redrawn.
+- **Analogy.** A recipe card where each step was photographed. Change step 4 and you re-cook steps 4–7; steps 1–3 come from the photo album.
+- **Common misconception.** "Editing `cli.py` only rebuilds a tiny layer." Here `COPY . ./` comes **before** `RUN uv sync`, so changing any file in the folder (even `group_name`) re-runs `uv sync` on the next build (captured: after the `cli.py` edit and `uv add`, build steps 2–3 were `CACHED` and steps 4–5 ran). Later tutorials copy `pyproject.toml` and `uv.lock` first for exactly this reason (`llm-rag/Dockerfile:42-48`: `COPY --chown=app:app pyproject.toml uv.lock* ./`, `RUN uv sync --frozen`, then `COPY --chown=app:app . ./`; §8 B3). During development you rarely rebuild for code changes anyway, because the bind mount (3.4) shows them at once.
+
+### 3.4 Image vs container vs bind mount: where does state live?
+- **Explanation.** An **image** is the read-only stack. A **container** is a running process with a thin writable layer on top; `--rm` deletes that layer on exit. `-v "$(pwd):/app"` **overlays** your laptop folder onto `/app`, hiding whatever the image had there (the `COPY`'d files). Three consequences:
+  1. Editing `cli.py` in VS Code changes it inside the container immediately (`transcribe_audio/README.md:102`; captured: `grep -n "^group_name" cli.py` inside showed the laptop's edit).
+  2. Anything written under `/app` (`pyproject.toml`, `uv.lock`, downloaded inputs, outputs) lands in **your laptop's folder** and survives `--rm`.
+  3. Anything written elsewhere, for example `uv add` installing into `/home/app/.venv`, lives in the container's writable layer and **vanishes** on exit.
+
+  That is why the Dockerfile moves the venv to `/home/app/.venv` (`README.md:192`). In L02's image the venv was `.venv` next to the code (`simple-translate/Dockerfile.txt:29`); mounting over that would hide the venv, or expose a laptop `.venv` built for another operating system.
+- **Mental model.** The container is a stage set and the image the permanent scenery. `/app` is a window cut through the set that looks straight into your laptop's folder. Things placed in the window are on your desk; things placed on the set are swept away when the show ends (`--rm`).
+- **Analogy.** A hotel room (the container) with one drawer that is magically connected to your desk drawer at home (the bind mount). Whatever you leave in the rest of the room is cleaned out at checkout.
+- **Common misconception.** "`uv add` inside the container installed the package, so it's in my image now." It is in that container's venv only until you exit. Captured: a new container from the image built before `uv add` failed again with `ModuleNotFoundError: No module named 'google'`. `pyproject.toml` and `uv.lock` (on your laptop, through the mount) remember the packages; a **rebuild** bakes them in (`transcribe_audio/README.md:110`).
+  A second one: "the prompt has no `(transcribe-audio)`, so the venv isn't active." `exec bash` starts a new interactive shell that reads `/home/app/.bashrc`, which resets the prompt; the exported `VIRTUAL_ENV` and `PATH` survive (captured: `which python` → `/home/app/.venv/bin/python`).
+
+### 3.5 The uv dependency loop inside a container
+- **Explanation.** The tutorial's loop:
+  1. `uv init --bare` on the laptop gives a `pyproject.toml` with `dependencies = []`;
+  2. build the image (`uv sync` installs nothing yet: captured `Resolved 1 package`, the project itself);
+  3. run it, and inside `uv add google-cloud-storage google-cloud-speech ffmpeg-python`, which writes `pyproject.toml` and a new `uv.lock` **on the laptop** and installs into the live venv (captured: `Resolved 27 packages`, `Installed 26 packages`);
+  4. run the code;
+  5. exit and rebuild, so `COPY` brings the lockfile in and `uv sync` installs the same 26 packages into the image (`transcribe_audio/README.md:19-24`, `:104-110`).
+
+  A shortcut the README doesn't mention: run `uv add …` on the laptop right after `uv init --bare`, and the first build already has everything.
+- **Mental model.** `pyproject.toml` is the shopping list, `uv.lock` the itemised receipt, the venv the fridge. `uv add` writes the list, prints a receipt and stocks the fridge; `uv sync` restocks a fridge from the receipt.
+- **Analogy.** Trying a recipe in a rental kitchen (the container): you buy the ingredients there, but you also write them on your own list, so your own kitchen (the image) can be stocked next time.
+- **Common misconception.** "`uv init --bare` is harmless boilerplate." It stamps `requires-python = ">=X.Y"`, where X.Y is the Python uv finds **on your laptop**. Captured: `>=3.11` on a laptop with Python 3.11.2, which the image's 3.12 satisfies. A laptop with Python 3.13 (or a uv-managed 3.13+) gets `>=3.13` (the digest's check with uv 0.11.32), and then the image's `uv sync` silently **downloads the newest matching CPython** and builds the venv on it. `generate_text`'s committed `requires-python = ">=3.14"` shows it in the captures: `Downloading cpython-3.15.0-linux-x86_64-gnu (download) (35.9MiB)`, `Using CPython 3.15.0` (§6 G3). Set it to `>=3.12`.
+
+### 3.6 Service accounts and Application Default Credentials (ADC)
+- **Explanation.** Google checks every request twice (`README.md:92-95`):
+  - **Authentication** (who is calling?): the service account whose private key is in `mega-pipeline.json`.
+  - **Authorisation** (may it do this?): the IAM roles of that service account on the project or bucket.
+
+  Your code never passes the key. `storage.Client()`, `translate.Client()`, `TextToSpeechLongAudioSynthesizeClient()` and `speech.SpeechClient()` call `google.auth.default()`, which first checks the env var `GOOGLE_APPLICATION_CREDENTIALS` and loads the JSON file it names (captured traceback: `google/cloud/client/__init__.py`, line 218, `credentials, _ = google.auth.default(scopes=scopes)` for `translate.Client()`). On the first request the credentials sign a JWT with the key and exchange it for a short-lived access token, sent as an `Authorization: Bearer …` header. The Gemini client `genai.Client(vertexai=True, project=…)` is the exception: it loads credentials lazily, on the first request (captured: B's `--help` works without a key).
+- **Mental model.** The JSON key is a key-card encoder. ADC is the front desk that cuts you a short-lived key card (the access token) when asked. IAM is the lock on each door, deciding whether that card opens it.
+- **Analogy.** A company badge for a robot employee: the robot (your app) badges in, not you.
+- **Common misconception.** "The key file is just a config file." It is a long-lived password to the course's project: whoever holds it can run these APIs on the course's bill.
+  A second one: "`GOOGLE_APPLICATION_CREDENTIALS=secrets/mega-pipeline.json` always works." It is a **relative** path, so it works only while the current directory is `/app` (§6 G5, §8 C2). Captured, without a key: `google.auth.exceptions.DefaultCredentialsError: File secrets/mega-pipeline.json was not found.`, raised at `google/auth/_default.py`, line 178.
+
+### 3.7 Managed AI APIs and long-running operations (LROs)
+- **Explanation.** Each stage outsources its ML to a hosted API:
+  - **Speech-to-Text v1** (A): ffmpeg converts the MP3 to FLAC first, because v1 doesn't take MP3 (MP3 is "a Beta feature and only available in v1p1beta1", per `google-cloud-speech` 2.41.0's `speech_v1/types/cloud_speech.py:561-563`) and FLAC carries its own sample rate. Then `long_running_recognize` with the audio bytes inline, waiting up to 90 s (`transcribe_audio/cli.py:65-78`). Automatic punctuation is off by default, so the raw transcript is unpunctuated, one reason B rewrites it.
+  - **Gemini on Vertex AI** (B), through `google-genai`: `client.models.generate_content(model=…, contents=prompt)` (`generate_text/cli.py:23-25`, `:73-77`).
+  - **Cloud Translation v2** (D): `translate_client.translate(…, source_language="en", target_language="fr", format_="text")` (`translate_text/cli.py:58-63`).
+  - **Text-to-Speech Long Audio** (C, E): `synthesize_long_audio` with an `output_gcs_uri`, so the **TTS service writes the audio object straight into the bucket**. That is why C and E have no `--upload` (`synthesis_audio_en/cli.py:77-91`; `README.md:151`).
+
+  A long-running call returns an `operation` handle immediately; `.result(timeout=…)` waits, polling, until the server finishes.
+- **Mental model.** Dropping off dry cleaning: you get a ticket (the operation) and come back later. With Long Audio TTS you even ask the cleaner to deliver to your locker (the bucket), so you never carry it home.
+- **Analogy.** Ordering delivery to a friend's address versus picking it up yourself. `cli_11.py` picks the ElevenLabs audio up locally and then uploads it; Google TTS delivers it directly.
+- **Common misconception.** "Synthesis produces a local `.mp3` I can play." No local file is created ("no local file is created", `synthesis_audio_en/README.md:8`), so the local "skip if it exists" check at `synthesis_audio_en/cli.py:57-58` can never fire. Also, the object is named `.mp3` but the request asks for `LINEAR16` (`synthesis_audio_en/cli.py:73`), which the TTS library documents as uncompressed PCM that "also contains a WAV header" (`texttospeech_v1/types/cloud_tts.py:90-93`, google-cloud-texttospeech 2.38.0). See §9 E7.
+
+### 3.8 Secrets hygiene: `.gitignore` is not `.dockerignore`
+- **Explanation.** The README promises the key won't reach GitHub because of `.gitignore` (`README.md:103-106`), and for Git that is true. But `docker build` sends the **whole folder** (the build context) to the builder, and `COPY . ./` copies all of it, `secrets/` included, into an image layer. On `main` no `.dockerignore` excludes it, so the optional `docker push` (`transcribe_audio/README.md:136-140`) would publish the key. Captured with a stand-in file: `docker run --rm --entrypoint ls transcribe_audio -la /app/secrets` lists `mega-pipeline.json`; after adding a `.dockerignore` with `secrets/` and rebuilding, the same command says `ls: cannot access '/app/secrets': No such file or directory`, and the app still finds the key through the mount at run time. The README's "canonical (best) way" (`README.md:106`), keeping secrets outside the repo, is what `solution` and L04's `flexible-workflow` do: a `secrets/` folder two levels up from the component, mounted at `/secrets` at **run** time (`origin/solution:transcribe_audio/docker-shell.sh:9-10`, `:96-99`).
+- **Mental model.** `.gitignore` filters what goes into the *history book*; `.dockerignore` filters what goes into the *shipping box*. Different boxes.
+- **Analogy.** You kept your house key out of the photo album (Git) but packed it in the moving box (the image) you're about to mail to strangers (Docker Hub).
+- **Common misconception.** "Docker reads `.gitignore`." It doesn't. And the build's `SecretsUsedInArgOrEnv` warning doesn't catch this: it only flags the *name* of the variable on Dockerfile line 10, not the copied file.
+
+---
