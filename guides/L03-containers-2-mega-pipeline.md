@@ -101,9 +101,9 @@ Commands in backticks are exactly as the README writes them (placeholders kept).
   - Note: if `uv --version` says `uv: command not found`, install uv with one of the next three commands first, restart your terminal and re-run `uv init --bare` (`:26-34`).
 - [ ] `curl -LsSf https://astral.sh/uv/install.sh | sh` — macOS / Linux, only if uv is missing; captured: `downloading uv 0.13.0 x86_64-unknown-linux-gnu`, `installing to /home/student/.local/bin`.
 - [ ] `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"` — Windows (PowerShell) instead. Not captured.
-- [ ] `pip install uv` — the README's alternative. Not captured.
-  - Note: on Linux with Debian's or Ubuntu's own Python, pip refuses with `error: externally-managed-environment` (PEP 668, seen in L01). Use the curl line there.
 - [ ] Restart your terminal, `cd` back into `transcribe_audio`, and re-run `uv init --bare` (`:34`).
+- [ ] `pip install uv` — "Alternatively, you can install via pip" (`:34`); then restart and re-run `uv init --bare` the same way. Not captured.
+  - Note: on Linux with Debian's or Ubuntu's own Python, pip refuses with `error: externally-managed-environment` (PEP 668, seen in L01). Use the curl line there.
 - [ ] `cat pyproject.toml` — *(extra)* `requires-python = ">=3.11"` on the recording laptop (its Python is 3.11.2), `dependencies = []`.
   - Note: the number comes from **your** laptop's Python. If yours says `>=3.13` or higher, change it to `requires-python = ">=3.12"` (or delete the file and run `uv init --bare --python 3.12`). This fix is not in the README; without it, the image's `uv sync` downloads a different Python (§6 G3).
 
@@ -159,7 +159,7 @@ Commands in backticks are exactly as the README writes them (placeholders kept).
 - [ ] `ls -a; cat pyproject.toml` — *(extra)* this folder already has a `pyproject.toml` (`requires-python = ">=3.14"`, both packages listed) and a `main.py`, and no `.gitignore`.
 - [ ] `uv init --bare` (`:22`) [B3]
   - Note: fails as written today: ``error: Project is already initialized in `/home/student/mega-pipeline/generate_text` (`pyproject.toml` file exists)``, exit 2. Skip it. Instead edit the committed file to `requires-python = ">=3.12"` **before** the first build (§6 G3, G4).
-- [ ] The "Don't have uv installed?" block again (`:26-34`): `curl -LsSf https://astral.sh/uv/install.sh | sh`, `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`, `pip install uv` — skip, uv is installed by now.
+- [ ] The "Don't have uv installed?" block again (`:26-34`): `curl -LsSf https://astral.sh/uv/install.sh | sh` or `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`, then restart your terminal and re-run `uv init --bare`; or `pip install uv` — skip, uv is installed by now.
 - [ ] Create the `Dockerfile` [B4]: the same as A's, except `ARG DEBIAN_PACKAGES="build-essential"` (`:45`); "no `ffmpeg` (this component doesn't touch audio)" (`:38`).
 - [ ] Build your docker image and give it the name `generate_text` (`:95`) [B5]: `docker build -t generate_text .`
   - Note: with the committed `>=3.14`, the full log shows `uv sync` downloading `cpython-3.15.0-linux-x86_64-gnu (download) (35.9MiB)` and building the venv on it; the compact view shows only `[5/5] RUN uv sync 5.9s`. 54.0 s in all.
@@ -184,7 +184,7 @@ Commands in backticks are exactly as the README writes them (placeholders kept).
 - [ ] Save `mega-pipeline.json` inside `synthesis_audio_en/secrets/` (`:16-17`) [C2].
 - [ ] `uv init --bare` (`:22`) [C3]; captured: ``Initialized project `synthesis-audio-en` ``, `requires-python = ">=3.11"`.
   - Note: if yours says `>=3.13` or higher, change it to `>=3.12` (§6 G3). The same applies in D and E.
-- [ ] The "Don't have uv installed?" block (`:26-34`): `curl -LsSf https://astral.sh/uv/install.sh | sh`, `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`, `pip install uv` — skip.
+- [ ] The "Don't have uv installed?" block (`:26-34`): `curl -LsSf https://astral.sh/uv/install.sh | sh` or `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`, then restart your terminal and re-run `uv init --bare`; or `pip install uv` — skip.
 - [ ] Create the `Dockerfile` with `ARG DEBIAN_PACKAGES="build-essential"` (`:45`) [C4].
   - Note: the text at `:38` says "keep `ffmpeg` in the system packages", but the code block leaves it out, and the code block is right: `synthesis_audio_en/cli.py` never uses ffmpeg (§9 E3).
 - [ ] Build your docker image and give it the name `synthesis_audio_en` (`:95`) [C5]: `docker build -t synthesis_audio_en .` — captured: `CACHED [2/5]` and `Building 0.6s`, because the Dockerfile is identical to B's up to that line.
@@ -206,7 +206,7 @@ Commands in backticks are exactly as the README writes them (placeholders kept).
 - [ ] `cd translate_text` — "`cd` into the `translate_text` folder" (`:13`) [D1].
 - [ ] Save `mega-pipeline.json` inside `translate_text/secrets/` (`:16-17`) [D2].
 - [ ] `uv init --bare` (`:22`) [D3]; captured: ``Initialized project `translate-text` ``, `requires-python = ">=3.11"`.
-- [ ] The "Don't have uv installed?" block (`:26-34`): `curl -LsSf https://astral.sh/uv/install.sh | sh`, `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`, `pip install uv` — skip.
+- [ ] The "Don't have uv installed?" block (`:26-34`): `curl -LsSf https://astral.sh/uv/install.sh | sh` or `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`, then restart your terminal and re-run `uv init --bare`; or `pip install uv` — skip.
 - [ ] Create the `Dockerfile` with `ARG DEBIAN_PACKAGES="build-essential"` (`:45`; "No audio here, so drop `ffmpeg`", `:38`) [D4].
 - [ ] Build your docker image and give it the name `translate_text` (`:95`) [D5]: `docker build -t translate_text .` — captured: `CACHED [2/5]`, `Building 0.6s`.
 - [ ] `docker run --rm -ti -v "$(pwd):/app" translate_text` (`:99`) [D6]
@@ -227,7 +227,7 @@ Commands in backticks are exactly as the README writes them (placeholders kept).
 - [ ] `cd synthesis_audio` — "`cd` into the `synthesis_audio` folder" (`:13`) [E1].
 - [ ] Save `mega-pipeline.json` inside `synthesis_audio/secrets/` (`:16-17`) [E2].
 - [ ] `uv init --bare` (`:22`) [E3]; captured: ``Initialized project `synthesis-audio` ``, `requires-python = ">=3.11"`.
-- [ ] The "Don't have uv installed?" block (`:26-34`): `curl -LsSf https://astral.sh/uv/install.sh | sh`, `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`, `pip install uv` — skip.
+- [ ] The "Don't have uv installed?" block (`:26-34`): `curl -LsSf https://astral.sh/uv/install.sh | sh` or `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`, then restart your terminal and re-run `uv init --bare`; or `pip install uv` — skip.
 - [ ] Create the `Dockerfile` with `ARG DEBIAN_PACKAGES="build-essential"` (`:45`) [E4].
   - Note: the text at `:38` says "Audio again, so keep `ffmpeg`"; the code block, which is right, leaves it out (§9 E3).
 - [ ] Build your docker image and give it the name `synthesis_audio` (`:95`) [E5]: `docker build -t synthesis_audio .` — captured: `CACHED [2/5]`, `Building 0.7s`.
