@@ -21,7 +21,7 @@
 - **(A) mega-pipeline, `flexible-workflow`.** The five-stage podcast pipeline from L03 (transcribe → generate → synthesize EN, translate → synthesize FR), re-run the way a team would ship it: your own GCS bucket and service account, the JSON key kept in a `secrets/` folder *beside* the repo and mounted at run time, and a committed `Dockerfile`, `pyproject.toml`, `uv.lock` and `docker-shell.sh` per component. The script builds the image locally, runs a prebuilt one (falling back to Docker Hub), or builds a multi-arch image and pushes it. You write no Dockerfile; you set three values in each `cli.py` and drive each container's CLI.
 - **(B) port_toy.** A two-container web app: a published **gateway** and an internal **processor** on the network `toynet`. You wire it by hand with `docker network create`, `docker run -p` and `-e`, break it by changing ports, fix it with configuration only, and then replace all of it with one `docker-compose.yml`.
 
-**Time needed** (estimate). Part A: about 45 minutes of GCP setup (service account, key, APIs, bucket), then 10-15 minutes per component; the first build of `transcribe_audio` took 99.5 s on the recording laptop, the others 8-53 s. About 2 hours in all. Part B: about 45 minutes, with no cloud account. The follow-along video: about 32 minutes, in two parts (part 1: the flexible workflow; part 2: port_toy). The exercises in §8: about another hour.
+**Time needed** (estimate). Part A: about 45 minutes of GCP setup (service account, key, APIs, bucket), then 10-15 minutes per component; the first build of `transcribe_audio` took 99.5 s on the capture laptop, the others 8-53 s. About 2 hours in all. Part B: about 45 minutes, with no cloud account. The follow-along video: about 32 minutes, in two parts (part 1: the flexible workflow; part 2: port_toy). The exercises in §8: about another hour.
 
 **Prerequisites.**
 - Tutorial 0, which covers a GCP account and project, VS Code, Git, Docker Desktop and `uv` (`mega-pipeline/README.md:22-26`). This lecture uses Docker Desktop with Compose v2 (`docker compose`) and Buildx, Git, and a bash shell (Git BASH on Windows).
@@ -81,7 +81,7 @@
   - There was **no Google account and no service-account key**: `~/AC215/secrets/` existed but was empty, so every Google call stops at `DefaultCredentialsError`, and nothing reached a bucket or an API. Where that matters, §4 shows the real no-key output and says what to look for with your key.
   - The browser was replaced by `curl` sending the page's request (`POST /` with `{"text": …}`); its JSON reply is what the page draws.
   - Files: [`assets/terminal/`](https://github.com/JunyiZhou-Conny/Explainer_Videos/tree/main/videos/ac215-l04-flexible-workflow-ports/assets/terminal) (`port-laptop/`, `mega-laptop/`, `mega-<component>/`, `mega-l03-laptop/`, `gcloud-laptop/`, `expected/`, with `capture.sh` and `run_steps.sh`); provenance in [`ASSETS.md`](https://github.com/JunyiZhou-Conny/Explainer_Videos/blob/main/videos/ac215-l04-flexible-workflow-ports/ASSETS.md).
-  - How they differ from your laptop: builds needed the recording proxy's CA, so the two base images were rebuilt under their own names (build logs show a different `FROM` digest and `https://deb.debian.org`, and no base-image download; your first build pulls the base image); Docker Hub pulls went through the `mirror.gcr.io` mirror; container ids, ephemeral ports, timestamps and build times change on every run. Your prompt shows your own user and folder.
+  - How they differ from your laptop: builds needed the capture environment's proxy CA, so the two base images were rebuilt under their own names (build logs show a different `FROM` digest and `https://deb.debian.org`, and no base-image download; your first build pulls the base image); Docker Hub pulls went through the `mirror.gcr.io` mirror; container ids, ephemeral ports, timestamps and build times change on every run. Your prompt shows your own user and folder.
 - **Exercise checks.** The answers in `exercises.md` were checked the same day (06:10-06:35 UTC) on the same kind of stand-in laptop; §8 quotes them.
 - **The digest** (registry metadata read on 2026-10-12 and 2026-10-13, a `git`-only branch-switch experiment, no Docker daemon) supplies the code tour, the history and the errata. Where its expectations differ from the captures, this guide follows the captures:
   - The branch switch from an L03 clone refuses with **two** reasons at once (edited `cli.py` and untracked `generate_text` files); the README's `git stash` clears only the first; `git stash -u` is needed. `git fetch origin` printed nothing.
@@ -107,7 +107,7 @@ Commands in backticks are exactly as the READMEs write them (placeholders kept);
 
 ### Before the README *(extra)*
 
-- [ ] `docker version` — *(extra)* the client and the engine both answer (Docker Engine 29.8.2 at the time of recording). If the server part errors, start Docker Desktop.
+- [ ] `docker version` — *(extra)* the client and the engine both answer (Docker Engine 29.8.2 at the time of capture). If the server part errors, start Docker Desktop.
 - [ ] `mkdir -p ~/AC215 && cd ~/AC215` — *(extra, not captured)* a workspace folder; the README calls it `<your-workspace>` (`README.md:108`). Both tutorials are cloned here.
 
 ### mega-pipeline · Get the Code (`README.md:30-52`)
@@ -447,7 +447,7 @@ You write no Dockerfile this time. You read them, configure three values per `cl
 |  |   /app             <- bind mount: your live component folder (code + outputs)  |              |
 |  |   /secrets         <- bind mount: <your-workspace>/secrets (the key)            |              |
 |  |   /home/app/.venv  <- baked into the image by `RUN uv sync` (Python 3.14.8 at  |              |
-|  |                       the time of recording, uv 0.13.0)                        |              |
+|  |                       the time of capture, uv 0.13.0)                          |              |
 |  |   app@<id>:/app$ python cli.py -d | -t/-g/-s | -u                              |              |
 |  +----------|--------------------------------------------------------^------------+              |
 +-------------|--------------------------------------------------------|-----------------------------+
@@ -478,7 +478,7 @@ You write no Dockerfile this time. You read them, configure three values per `cl
    browser --> http://localhost:8090 ----+          curl http://localhost:9200  -->  curl: (7) refused
                                          |  published: 127.0.0.1:8090 -> 9100/tcp  (-p / ports:)
  +---------------------------------------|---- user-defined bridge network "toynet" ------------------+
- |  (172.19.0.0/16 in the recording)     |                                                            |
+ |  (172.19.0.0/16 in the capture)       |                                                            |
  |  Docker embedded DNS at 127.0.0.11: "gateway" -> 172.19.0.3    "processor" -> 172.19.0.2           |
  |                                       v                                                            |
  |  [gateway]  own netns, own localhost         [processor]  own netns, own localhost                 |
