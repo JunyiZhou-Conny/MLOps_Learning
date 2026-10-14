@@ -6,7 +6,7 @@
 
 - **做什么：** 用 `dlops-io/mega-pipeline`（branch `main`）搭一个 AI podcast pipeline。五个 component folder：`transcribe_audio`（A）、`generate_text`（B）、`synthesis_audio_en`（C）、`translate_text`（D）、`synthesis_audio`（E），每个都有一个给好的 `cli.py`，但**没有 Dockerfile，要你自己写**。每个 component 一个 image、一个 container：从全班共用的 GCS bucket `mega-pipeline-bucket` 拿 input，调一个 Google 的 managed AI API（Speech-to-Text、Vertex AI 上的 Gemini、Text-to-Speech、Translation），再把 output 写回 bucket。认证用 Canvas 上下载的 service account key `mega-pipeline.json`，所有调用都记在课程的 GCP project 上，不花你自己的钱。
 - **Idea 1 · bucket 就是 message bus：** container 之间从不直接通信，只靠 object name 的约定交接：`input_audios/` → A → `text_prompts/<group>/` → B → `text_paragraphs/<group>/` → C（写 `text_audios/<group>/`）和 D（写 `text_translated/<group>/`）→ E（写 `output_audios/<group>/`）。GCS 里没有真正的 folder，只有 prefix。`group_name`（默认 `"pavlos"`，没有 assert）是唯一把各组分开的东西，五个 `cli.py` 里必须写成一样的。没有任何东西会自动触发下一步，每个 stage 都是你手动跑。
-- **Idea 2 · Dockerfile 一行一行自己写：** `FROM python:3.12-slim-bookworm` + `ARG DEBIAN_PACKAGES`（只有 A 需要 `ffmpeg`）+ 六个 `ENV` + 一个大 `RUN`（apt 装包、删 apt list、`pip install uv`、建 non-root user `app`，uid 1000）+ `USER app` / `WORKDIR /app` + `COPY --chown=app:app . ./` + `RUN uv sync` + `ENTRYPOINT`/`CMD`。README 只说 "Build your docker image and give your image the name `transcribe_audio`"，没给命令，用 `docker build -t transcribe_audio .`。2026-10-13 的 capture 里，A 第一次 build 的 apt 那一步装了 237 个 package（205 MB），46.9 s，image 1.35 GB。
+- **Idea 2 · Dockerfile 一行一行自己写：** `FROM python:3.12-slim-bookworm` + `ARG DEBIAN_PACKAGES`（只有 A 需要 `ffmpeg`）+ 六个 `ENV` + 一个大 `RUN`（apt 装包、删 apt list、`pip install uv`、建 non-root user `app`，uid 1000）+ `USER app` / `WORKDIR /app` + `COPY --chown=app:app . ./` + `RUN uv sync` + `ENTRYPOINT`/`CMD`。README 只说 "Build your docker image and give your image the name `transcribe_audio`"，没给命令，用 `docker build -t transcribe_audio .`。2026-10-13 的 capture 里，A 第一次 build 的 apt 那一步装了 237 个 package（下载 205 MB），46.9 s，image 1.35 GB。
 - **Idea 3 · bind mount 是一扇窗：** `docker run --rm -ti -v "$(pwd):/app" transcribe_audio` 把笔记本上的 component folder 盖在 container 的 `/app` 上。VS Code 里改 `cli.py` 立刻生效；写在 `/app` 下的东西（`pyproject.toml`、`uv.lock`、下载的数据）直接落在 host 上，`--rm` 之后还在。venv 在 `/home/app/.venv`（`ENV UV_PROJECT_ENVIRONMENT`），在 mount 外面，所以不会被盖住。prompt 是 `app@<container-id>:/app$`，没有 `(transcribe-audio)` 前缀，但 venv 是 active 的：`which python` → `/home/app/.venv/bin/python`。
 - **Idea 4 · `uv add` → exit → rebuild：** 在 container 里 `uv add google-cloud-storage google-cloud-speech ffmpeg-python` 装了 26 个 package，但它们在 container 的 writable layer 里，`exit` 时跟着 `--rm` 一起没了，只有 `pyproject.toml` 和 `uv.lock`（138,445 bytes）留在 host 上。再开一个新 container 又是 `ModuleNotFoundError: No module named 'google'`。必须 rebuild 一次：`COPY` 把新的 `pyproject.toml`/`uv.lock` 带进去，`uv sync` 把 26 个 package 装进 image（rebuild 后 1.48 GB）。
 - **Idea 5 · ADC 怎么找到 key：** 代码里从来不传 key。`storage.Client()` 这类 client 会调 `google.auth.default()`（Application Default Credentials），它第一站就看 `GOOGLE_APPLICATION_CREDENTIALS=secrets/mega-pipeline.json`。这是一个 **relative path**，只有 cwd 是 `/app` 时才指得到你 folder 里的 `secrets/`；找不到就是 `DefaultCredentialsError: File secrets/mega-pipeline.json was not found.`。C、D、E 在 import 时就建 client，所以没有 key 连 `python cli.py --help` 都报这个错；A 和 B 的 `--help` 不需要 key。
@@ -19,7 +19,7 @@
 
 **What you build.** An "AI podcast factory" made of five small, separate Docker containers, one per folder of the repo. Each runs a given `cli.py` (120–154 lines) that pulls its input from a class-wide Google Cloud Storage bucket, calls one managed Google AI API (Speech-to-Text, Gemini on Vertex AI, Text-to-Speech or Cloud Translation) and leaves its output in the bucket under the next "folder" (prefix), scoped by your team's `group_name`. The containers never talk to each other: the bucket is the hand-off (`README.md:60-67`). Unlike L02, no Dockerfile is given. You write one per component from the component README's pieces, scaffold `pyproject.toml` with `uv init --bare`, build, run with your folder bind-mounted at `/app`, `uv add` the packages inside the container, and rebuild to bake them in.
 
-**Time needed** (estimate). On the recording machine (2026-10-13, Docker Engine 29.8.2): A's first build about two minutes (the apt step 46.9 s, then exporting the image); B's first build 54.0 s; C, D and E about a second each, because they reuse B's apt layer; every rebuild after `uv add` 8–18 s. With the course key, Speech-to-Text waits up to 90 s per recording (`transcribe_audio/cli.py:78`) and Text-to-Speech up to 300 s (`synthesis_audio_en/cli.py:90`). The follow-along video is about half an hour, in two parts (part 1: the pipeline and your first Dockerfile; part 2: packages, the key and all five components). With the extras in §4 and the exercises, budget 3 hours.
+**Time needed** (estimate). On the recording machine (2026-10-13, Docker Engine 29.8.2): A's first build just under two minutes (the apt step 46.9 s, then 55.7 s exporting and unpacking the image); B's first build 54.0 s; C, D and E about a second each, because they reuse B's apt layer; every rebuild after `uv add` 7.6–18.4 s. With the course key, Speech-to-Text waits up to 90 s per recording (`transcribe_audio/cli.py:78`) and Text-to-Speech up to 300 s (`synthesis_audio_en/cli.py:90`). The follow-along video is about half an hour, in two parts (part 1: the pipeline and your first Dockerfile; part 2: packages, the key and all five components). With the extras in §4 and the exercises, budget 3 hours.
 
 **Prerequisites.**
 - Tutorial 0 finished: a GCP account and project, VS Code, Git, **Docker Desktop** and **uv** (`README.md:24`). In this lecture uv runs on your laptop too (`uv init --bare`), not only in the image.
@@ -129,7 +129,7 @@ Commands in backticks are exactly as the README writes them (placeholders kept).
 *CLI to interact with your code* (`:112-127`)
 - [ ] On your laptop, in VS Code, change `group_name = "pavlos"` in `cli.py` (line 21) to your team's name, e.g. `group-01` [A8] (`:114`).
 - [ ] `grep -n "^group_name" cli.py` — *(extra, inside)* `21:group_name = "group-01" # This needs to be …`: the container sees the edit at once.
-- [ ] `python cli.py --help` — *inside* [A9]; matches the README's block (`:117-127`) line for line. Needs no key.
+- [ ] `python cli.py --help` — *inside* [A9]; matches the README's block (`:117-126`) line for line. Needs no key.
 
 *Testing your code locally* (`:129-134`) · *Quick Reference: Transcribe Audio* (`README.md:132-137`)
 - [ ] `python cli.py -d` = `python cli.py --download` — *inside*, with your key [A10]: downloads every recording under `input_audios/` into `input_audios/` on your laptop.
@@ -191,7 +191,7 @@ Commands in backticks are exactly as the README writes them (placeholders kept).
 - [ ] `docker run --rm -ti -v "$(pwd):/app" synthesis_audio_en` (`:99`) [C6]
 - [ ] `uv add google-cloud-storage google-cloud-texttospeech` — *inside* (`:104-106`) [C7]; captured: `Resolved 25 packages`, `Installed 24 packages` (`google-cloud-texttospeech==2.38.0`).
 - [ ] Change `group_name = "pavlos"` in `cli.py` (line 18) (`:112`) [C8].
-- [ ] `python cli.py --help` — *inside* (`:115`) [C9]; with the key in `secrets/`, the README's block (`:116-124`, *expected*).
+- [ ] `python cli.py --help` — *inside* (`:115`) [C9]; with the key in `secrets/`, the README's block (`:116-123`, *expected*).
   - Note: without the key it fails at import: `cli.py` line 22 builds the Text-to-Speech client, which raises `DefaultCredentialsError: File secrets/mega-pipeline.json was not found.` (captured).
 - [ ] `python cli.py -d` = `python cli.py --download` — *inside*, with your key (`:128`; `README.md:148`) [C10]: fetches `text_paragraphs/<group>/input-*.txt`.
 - [ ] `python cli.py -s` = `python cli.py --synthesis` — *inside*, with your key (`:129`; `README.md:149`) [C11]: Text-to-Speech writes `text_audios/<group>/input-….mp3` straight into the bucket. There is no `--upload` (`README.md:151`).
@@ -212,7 +212,7 @@ Commands in backticks are exactly as the README writes them (placeholders kept).
 - [ ] `docker run --rm -ti -v "$(pwd):/app" translate_text` (`:99`) [D6]
 - [ ] `uv add google-cloud-storage google-cloud-translate` — *inside* (`:104-106`) [D7]; captured: `Resolved 26 packages`, `Installed 25 packages` (`google-cloud-translate==3.28.0`, which contains `translate_v2`).
 - [ ] Change `group_name = "pavlos"` in `cli.py` (line 18) (`:112`) [D8].
-- [ ] `python cli.py --help` — *inside* (`:115`) [D9]; with the key, the README's block (`:116-125`, *expected*).
+- [ ] `python cli.py --help` — *inside* (`:115`) [D9]; with the key, the README's block (`:116-124`, *expected*).
   - Note: without the key it fails at import (`cli.py` line 20, `translate.Client()`), captured.
 - [ ] `python cli.py -d` = `python cli.py --download` — *inside*, with your key (`:129`; `README.md:155`) [D10]: fetches `text_paragraphs/<group>/input-*.txt`, the same input as C.
 - [ ] `python cli.py -t` = `python cli.py --translate` — *inside*, with your key (`:130`; `README.md:156`) [D11]: English → French, saved to `text_translated/<group>/`.
@@ -234,7 +234,7 @@ Commands in backticks are exactly as the README writes them (placeholders kept).
 - [ ] `docker run --rm -ti -v "$(pwd):/app" synthesis_audio` (`:99`) [E6]
 - [ ] `uv add google-cloud-storage google-cloud-texttospeech` — *inside* (`:104-106`) [E7]; captured: `Resolved 25 packages`, `Installed 24 packages`.
 - [ ] Change `group_name = "pavlos"` in `cli.py` (line 18), and in `cli_11.py` (line 19) if you do the bonus (`:112`) [E8].
-- [ ] `python cli.py --help` — *inside* (`:115`) [E9]; with the key, the README's block (`:116-124`, *expected*), except that the real description line reads `Transcribe audio file to text` (`synthesis_audio/cli.py:105`, §9 E6).
+- [ ] `python cli.py --help` — *inside* (`:115`) [E9]; with the key, the README's block (`:116-123`, *expected*), except that the real description line reads `Transcribe audio file to text` (`synthesis_audio/cli.py:105`, §9 E6).
   - Note: without the key it fails at import (`cli.py` line 21), captured.
 - [ ] `python cli.py -d` = `python cli.py --download` — *inside*, with your key (`:128`; `README.md:162`) [E10]: fetches `text_translated/<group>/input-*.txt`.
 - [ ] `python cli.py -s` = `python cli.py --synthesis` — *inside*, with your key (`:129`; `README.md:163`) [E11]: French audio straight into `output_audios/<group>/`; no `--upload` (`README.md:165`).
@@ -917,7 +917,7 @@ Cloning into 'mega-pipeline'...
     -t, --transcribe  Transcribe audio files to text
     -u, --upload      Upload transcribed text to GCS bucket
   ```
-- **Checkpoint:** identical, line for line, to the README's block (`:117-127`). A's `--help` needs no key: its clients are created inside the functions.
+- **Checkpoint:** identical, line for line, to the README's block (`:117-126`). A's `--help` needs no key: its clients are created inside the functions.
 - Use **the same** group name in all five `cli.py` files (and `cli_11.py` for the bonus): each stage downloads `<prefix>/<group_name>/…`, written by the stage before (§6 G2).
 
 **Step 11. Download** [A10] (`:131`; `README.md:134`).
@@ -1218,7 +1218,7 @@ Same recipe, two surprises.
    => [5/5] RUN uv sync                                                      0.2s
   …
   ```
-  0.6 s: C's Dockerfile is identical to B's up to line 21, so Docker reuses B's apt layer.
+  0.6 s: C's Dockerfile is identical to B's (`files/synthesis_audio_en.Dockerfile`), so Docker reuses every layer of B's up to the `COPY`, the apt layer included.
 - **Action:** `docker run --rm -ti -v "$(pwd):/app" synthesis_audio_en` (`:99`), then (`synthesis_audio_en/01-uv-add.txt`, trimmed):
   ```
   app@…:/app$ uv add google-cloud-storage google-cloud-texttospeech
@@ -1818,27 +1818,99 @@ Survives: everything written under `/app`, i.e. your laptop's folder: `pyproject
 
 ### Hands-on (predict, then run)
 
-- **B1 · Three notes, three places.** In a container, `touch /app/note-app.txt /tmp/note-tmp.txt /home/app/note-home.txt`, `exit`; which notes exist on your laptop, and in a new container? <details><summary>Answer</summary>Only `note-app.txt`, on your laptop (`git status --short` shows `?? note-app.txt`). The other two were on the container's throwaway layer, like the packages from `uv add`. Delete `note-app.txt` afterwards.</details>
-- **B2 · Who asked for `requests`?** `uv tree --depth 1`, then `uv tree --invert --package requests`. <details><summary>Answer</summary>Three direct dependencies (`ffmpeg-python`, `google-cloud-speech`, `google-cloud-storage`); `requests v2.34.2` is pulled in by `google-api-core` and by `google-cloud-storage`. That's why E's bonus `uv add requests` prints `Checked 24 packages` and installs nothing; adding it is still right, because `cli_11.py` imports it itself.</details>
-- **B3 · Copy the lock first.** Replace Dockerfile lines 26–27 with `COPY --chown=app:app pyproject.toml uv.lock ./`, `RUN uv sync`, `COPY --chown=app:app . ./`; build, change only `group_name`, build again. Which steps say `CACHED`? <details><summary>Answer</summary>Six build steps now; after the edit, `[2/6]` to `[5/6]` (apt, `WORKDIR`, the lockfile copy, `uv sync`) are `CACHED` and only `[6/6] COPY . ./` runs. In a folder without `uv.lock` yet (before step 7), the build stops with `failed to compute cache key: … "/uv.lock": not found`, which is why the README's simpler order suits a first Dockerfile and later tutorials use this one (`llm-rag/Dockerfile:42-48`, with `uv.lock*`).</details>
-- **B4 · A smaller `uv sync` layer.** `du -sh /home/app/.venv /home/app/.cache/uv`, then `RUN uv sync --no-cache`. <details><summary>Answer</summary>About `50M` for the venv and `51M` for uv's cache; with `--no-cache` the layer drops from 105 MB to 52.4 MB and the image from 1.48 GB to 1.42 GB (checked on the recording's Docker Engine).</details>
-- **B5 · Old builds and the key.** After the `.dockerignore` fix, is the old image gone? Run `docker info | grep -iE "storage driver|driver-type"` and `docker images --filter dangling=true`. <details><summary>Answer</summary>Classic store (`Storage Driver: overlay2`): the previous build stays as an untagged image that still contains `mega-pipeline.json`; `docker image prune -f` deletes it. containerd image store (`driver-type: io.containerd.snapshotter.v1`, as in the recording): no untagged copy is listed, but the old `COPY` layer, key included, stays in the build cache (delete `.dockerignore`, rebuild, and that step says `CACHED`); `docker builder prune -f` removes it. Run both.</details>
+**B1 · Three notes, three places.** In a container, `touch /app/note-app.txt /tmp/note-tmp.txt /home/app/note-home.txt`, `exit`; which notes exist on your laptop, and in a new container?
+<details><summary>Answer</summary>
+
+Only `note-app.txt`, on your laptop (`git status --short` shows `?? note-app.txt`). The other two were on the container's throwaway layer, like the packages from `uv add`. Delete `note-app.txt` afterwards.
+</details>
+
+**B2 · Who asked for `requests`?** `uv tree --depth 1`, then `uv tree --invert --package requests`.
+<details><summary>Answer</summary>
+
+Three direct dependencies (`ffmpeg-python`, `google-cloud-speech`, `google-cloud-storage`); `requests v2.34.2` is pulled in by `google-api-core` and by `google-cloud-storage`. That's why E's bonus `uv add requests` prints `Checked 24 packages` and installs nothing; adding it is still right, because `cli_11.py` imports it itself.
+</details>
+
+**B3 · Copy the lock first.** Replace Dockerfile lines 26–27 with `COPY --chown=app:app pyproject.toml uv.lock ./`, `RUN uv sync`, `COPY --chown=app:app . ./`; build, change only `group_name`, build again. Which steps say `CACHED`?
+<details><summary>Answer</summary>
+
+Six build steps now; after the edit, `[2/6]` to `[5/6]` (apt, `WORKDIR`, the lockfile copy, `uv sync`) are `CACHED` and only `[6/6] COPY . ./` runs. In a folder without `uv.lock` yet (before step 7), the build stops with `failed to compute cache key: … "/uv.lock": not found`, which is why the README's simpler order suits a first Dockerfile and later tutorials use this one (`llm-rag/Dockerfile:42-48`, with `uv.lock*`).
+</details>
+
+**B4 · A smaller `uv sync` layer.** `du -sh /home/app/.venv /home/app/.cache/uv`, then `RUN uv sync --no-cache`.
+<details><summary>Answer</summary>
+
+About `50M` for the venv and `51M` for uv's cache; with `--no-cache` the layer drops from 105 MB to 52.4 MB and the image from 1.48 GB to 1.42 GB (checked on the recording's Docker Engine).
+</details>
+
+**B5 · Old builds and the key.** After the `.dockerignore` fix, is the old image gone? Run `docker info | grep -iE "storage driver|driver-type"` and `docker images --filter dangling=true`.
+<details><summary>Answer</summary>
+
+Classic store (`Storage Driver: overlay2`): the previous build stays as an untagged image that still contains `mega-pipeline.json`; `docker image prune -f` deletes it. containerd image store (`driver-type: io.containerd.snapshotter.v1`, as in the recording): no untagged copy is listed, but the old `COPY` layer, key included, stays in the build cache (delete `.dockerignore`, rebuild, and that step says `CACHED`); `docker builder prune -f` removes it. Run both.
+</details>
 
 ### Debugging
 
-- **C1 · A one-shot run.** `docker run --rm -v "$(pwd):/app" transcribe_audio python cli.py -d` → `cannot execute binary file`, exit 126. <details><summary>Answer</summary>`ENTRYPOINT ["/bin/bash"]` makes it `/bin/bash python cli.py -d`; bash reads `python` as a script. Use `… transcribe_audio -c "source /home/app/.venv/bin/activate && python cli.py -d"` or `--entrypoint /home/app/.venv/bin/python … cli.py -d` (G16). `-c "python cli.py -d"` alone fails with `ModuleNotFoundError`: without activation, `python` is the image's own.</details>
-- **C2 · "But my key is right there."** In `translate_text`, `cd /tmp && python /app/cli.py --help` → `DefaultCredentialsError: File secrets/mega-pipeline.json was not found.` <details><summary>Answer</summary>`translate.Client()` runs at import (`translate_text/cli.py:20`) and calls `google.auth.default()` before argparse sees `--help` (C and E likewise, at `:22` and `:21`; A and B don't). And the path is relative: from `/tmp` it means `/tmp/secrets/…`. `cd /app`.</details>
-- **C3 · `AttributeError: module 'ffmpeg' has no attribute 'input'`** at `cli.py` line 67. <details><summary>Answer</summary>The wrong PyPI project (`ffmpeg` or `python-ffmpeg`, both imported as `ffmpeg`). `uv remove ffmpeg`, `uv add ffmpeg-python`, exit, rebuild (G9). Reproducible without a key: `python -c "import ffmpeg; ffmpeg.input('x')"`.</details>
-- **C4 · `FileNotFoundError: [Errno 2] No such file or directory: 'ffmpeg'`** at `ffmpeg.run(stream)`, line 69. <details><summary>Answer</summary>`ffmpeg-python` starts the `ffmpeg` program, which comes from Debian through line 3. A line 3 without `ffmpeg` (the appendix's or B's) gives exactly this error. Fix line 3, exit, rebuild; the big `RUN` step runs again (G8).</details>
-- **C5 · "Transcribe does nothing."** One transcript says `None`; `-t` again prints `Args: …`, `transcribe` and nothing more. <details><summary>Answer</summary>No results from Speech-to-Text leave the placeholder `text = "None"` (lines 80, 84, 95–96), and a re-run skips every recording whose `.txt` exists (lines 61–62). Delete that `.txt`, run `-t` again, and `cat` the result before `-u` (G20).</details>
+**C1 · A one-shot run.** `docker run --rm -v "$(pwd):/app" transcribe_audio python cli.py -d` → `cannot execute binary file`, exit 126.
+<details><summary>Answer</summary>
+
+`ENTRYPOINT ["/bin/bash"]` makes it `/bin/bash python cli.py -d`; bash reads `python` as a script. Use `… transcribe_audio -c "source /home/app/.venv/bin/activate && python cli.py -d"` or `--entrypoint /home/app/.venv/bin/python … cli.py -d` (G16). `-c "python cli.py -d"` alone fails with `ModuleNotFoundError`: without activation, `python` is the image's own.
+</details>
+
+**C2 · "But my key is right there."** In `translate_text`, `cd /tmp && python /app/cli.py --help` → `DefaultCredentialsError: File secrets/mega-pipeline.json was not found.`
+<details><summary>Answer</summary>
+
+`translate.Client()` runs at import (`translate_text/cli.py:20`) and calls `google.auth.default()` before argparse sees `--help` (C and E likewise, at `:22` and `:21`; A and B don't). And the path is relative: from `/tmp` it means `/tmp/secrets/…`. `cd /app`.
+</details>
+
+**C3 · `AttributeError: module 'ffmpeg' has no attribute 'input'`** at `cli.py` line 67.
+<details><summary>Answer</summary>
+
+The wrong PyPI project (`ffmpeg` or `python-ffmpeg`, both imported as `ffmpeg`). `uv remove ffmpeg`, `uv add ffmpeg-python`, exit, rebuild (G9). Reproducible without a key: `python -c "import ffmpeg; ffmpeg.input('x')"`.
+</details>
+
+**C4 · `FileNotFoundError: [Errno 2] No such file or directory: 'ffmpeg'`** at `ffmpeg.run(stream)`, line 69.
+<details><summary>Answer</summary>
+
+`ffmpeg-python` starts the `ffmpeg` program, which comes from Debian through line 3. A line 3 without `ffmpeg` (the appendix's or B's) gives exactly this error. Fix line 3, exit, rebuild; the big `RUN` step runs again (G8).
+</details>
+
+**C5 · "Transcribe does nothing."** One transcript says `None`; `-t` again prints `Args: …`, `transcribe` and nothing more.
+<details><summary>Answer</summary>
+
+No results from Speech-to-Text leave the placeholder `text = "None"` (lines 80, 84, 95–96), and a re-run skips every recording whose `.txt` exists (lines 61–62). Delete that `.txt`, run `-t` again, and `cat` the result before `-u` (G20).
+</details>
 
 ### Think
 
-- **D1 · Make it Spanish.** Which lines change, what must you delete, and do you rebuild? <details><summary>Answer</summary>`translate_text/cli.py:61` → `target_language="es"`; `synthesis_audio/cli.py:47-48` → `"es-ES"` and a Spanish voice. No rebuild (code only, through the mount). Delete `text_translated/<group>/*.txt` on your laptop before `-t` (`translate_text/cli.py:52-53`), and the French audio under `output_audios/<group>/` in the bucket before `-s`, because synthesis skips existing objects (`blob.exists()`, line 68).</details>
-- **D2 · A recording called `podcast.mp3`.** How far does it get? <details><summary>Answer</summary>Downloaded (`list_blobs` takes everything, `transcribe_audio/cli.py:39-43`), transcribed to `text_prompts/<group>/podcast.txt`, never uploaded (the glob is `input-*.txt`, `:108`), and B would ignore it anyway (`generate_text/cli.py:42`). It stops after A's local output, with no error: file names are part of the interface.</details>
-- **D3 · From a Mac to a VM.** A teammate builds `generate_text` on Apple Silicon and pushes it; you run it on an amd64 VM. <details><summary>Answer</summary>The image is `linux/arm64`; an amd64 machine without emulation gives `exec format error`. Build both platforms: `docker buildx build --platform linux/amd64,linux/arm64 -t <USER NAME>/generate_text --push .` (as the solution's `prod` mode does, `docker-shell.sh:62-70`), and only with the `.dockerignore` fix.</details>
-- **D4 · A bucket instead of APIs.** What does it give, what does it cost? <details><summary>Answer</summary>Gains: stages needn't run at the same time; every intermediate result is a file you can inspect and redo; teams share one pipeline separated by prefixes; the leaderboard can read the same storage. Costs: nothing triggers the next stage; mistakes are silent (a wrong name or group matches nothing); two runs with one group overwrite each other; every stage needs bucket credentials. With APIs a call answers at once and can return an error, but every service must be up.</details>
-- **D5 · Three ways to hand a container the key.** (a) the README as written, (b) with `.dockerignore`, (c) last year's solution (one `secrets/` outside the repo, mounted at `/secrets`). In the image? Git? After `cd /tmp`? Copies on your laptop? <details><summary>Answer</summary>(a) in every image; ignored by Git; fails after `cd /tmp`; five copies. (b) not in the image; ignored; fails after `cd /tmp`; five copies. (c) not in the image; outside the repo, nothing to ignore; works from anywhere (`/secrets/mega-pipeline.json`); one copy. (c) is where the course goes next (L04).</details>
+**D1 · Make it Spanish.** Which lines change, what must you delete, and do you rebuild?
+<details><summary>Answer</summary>
+
+`translate_text/cli.py:61` → `target_language="es"`; `synthesis_audio/cli.py:47-48` → `"es-ES"` and a Spanish voice. No rebuild (code only, through the mount). Delete `text_translated/<group>/*.txt` on your laptop before `-t` (`translate_text/cli.py:52-53`), and the French audio under `output_audios/<group>/` in the bucket before `-s`, because synthesis skips existing objects (`blob.exists()`, line 68).
+</details>
+
+**D2 · A recording called `podcast.mp3`.** How far does it get?
+<details><summary>Answer</summary>
+
+Downloaded (`list_blobs` takes everything, `transcribe_audio/cli.py:39-43`), transcribed to `text_prompts/<group>/podcast.txt`, never uploaded (the glob is `input-*.txt`, `:108`), and B would ignore it anyway (`generate_text/cli.py:42`). It stops after A's local output, with no error: file names are part of the interface.
+</details>
+
+**D3 · From a Mac to a VM.** A teammate builds `generate_text` on Apple Silicon and pushes it; you run it on an amd64 VM.
+<details><summary>Answer</summary>
+
+The image is `linux/arm64`; an amd64 machine without emulation gives `exec format error`. Build both platforms: `docker buildx build --platform linux/amd64,linux/arm64 -t <USER NAME>/generate_text --push .` (as the solution's `prod` mode does, `docker-shell.sh:62-70`), and only with the `.dockerignore` fix.
+</details>
+
+**D4 · A bucket instead of APIs.** What does it give, what does it cost?
+<details><summary>Answer</summary>
+
+Gains: stages needn't run at the same time; every intermediate result is a file you can inspect and redo; teams share one pipeline separated by prefixes; the leaderboard can read the same storage. Costs: nothing triggers the next stage; mistakes are silent (a wrong name or group matches nothing); two runs with one group overwrite each other; every stage needs bucket credentials. With APIs a call answers at once and can return an error, but every service must be up.
+</details>
+
+**D5 · Three ways to hand a container the key.** (a) the README as written, (b) with `.dockerignore`, (c) last year's solution (one `secrets/` outside the repo, mounted at `/secrets`). In the image? Git? After `cd /tmp`? Copies on your laptop?
+<details><summary>Answer</summary>
+
+(a) in every image; ignored by Git; fails after `cd /tmp`; five copies. (b) not in the image; ignored; fails after `cd /tmp`; five copies. (c) not in the image; outside the repo, nothing to ignore; works from anywhere (`/secrets/mega-pipeline.json`); one copy. (c) is where the course goes next (L04).
+</details>
 
 ---
 
