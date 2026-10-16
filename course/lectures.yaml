@@ -1,0 +1,218 @@
+# AC215 · MLOps & LLMOps: Production AI Systems (Harvard, Fall 2026, Pavlos Protopapas)
+# Single source of truth for this repo: lectures -> tutorials -> repos -> study guides -> videos.
+# Lecture numbers and titles follow the Ed lessons (course site: tutorials_demo.md, synced with Ed
+# on 2026-10). `python tools/course_map.py` regenerates the map in README.md from this file;
+# `tools/sync_tutorials.py` clones/pulls every repo listed under `repos:`.
+
+course:
+  name: "AC215 / E115 · MLOps & LLMOps: Production AI Systems"
+  institution: Harvard University (IACS)
+  instructor: Pavlos Protopapas
+  term: Fall 2026
+  site: https://harvard-iacs.github.io/2026-AC215/
+  tutorials_page: https://harvard-iacs.github.io/2026-AC215/tutorials_demo/
+  ed: https://edstem.org/us/courses/97373/lessons
+  github_org: https://github.com/dlops-io
+
+# Every tutorial repository (GCP track). `pinned`: the commit the study guide and video were made
+# from (tools/sync_tutorials.py --pinned checks it out; the default is the latest main).
+repos:
+  ac215-setup:           {url: https://github.com/dlops-io/ac215-setup,           pinned: 61a7b9d}
+  simple-translate:      {url: https://github.com/dlops-io/simple-translate,      pinned: 62f821b}
+  mega-pipeline:         {url: https://github.com/dlops-io/mega-pipeline,         pinned: c6bbc9b}
+  port_toy:              {url: https://github.com/dlops-io/port_toy,              pinned: d190c71}
+  llm-rag:               {url: https://github.com/dlops-io/llm-rag,               pinned: e17a39f}
+  llm-agent-google-adk:  {url: https://github.com/dlops-io/llm-agent-google-adk,  pinned: f89faa7}
+  agent-harness:         {url: https://github.com/dlops-io/agent-harness,         pinned: e25dfe9}
+  llm-finetuning:        {url: https://github.com/dlops-io/llm-finetuning,        pinned: 44ef6f0}
+  cheese-app-ci-cd:      {url: https://github.com/dlops-io/cheese-app-ci-cd,      pinned: b8458ff}
+  cheese-app-v0:         {url: https://github.com/dlops-io/cheese-app-v0,         pinned: cb6fb94}
+  data-labeling:         {url: https://github.com/dlops-io/data-labeling,         pinned: 03c3e27}
+  data-versioning:       {url: https://github.com/dlops-io/data-versioning,       pinned: b240b1a}
+  model-training:        {url: https://github.com/dlops-io/model-training,        pinned: b9aee1c}
+  serverless-deployment: {url: https://github.com/dlops-io/serverless-deployment, pinned: 4eaf343}
+  model-deployment:      {url: https://github.com/dlops-io/model-deployment,      pinned: 3fbf63f}
+  ml-workflow:           {url: https://github.com/dlops-io/ml-workflow,           pinned: 972ffbb}
+  cheese-app-v1:         {url: https://github.com/dlops-io/cheese-app-v1,         pinned: ce03a10}
+  cheese-app-v2:         {url: https://github.com/dlops-io/cheese-app-v2,         pinned: 14f2a14}
+  cheese-app-v3:         {url: https://github.com/dlops-io/cheese-app-v3,         pinned: 3ecef56}
+  cheese-app-v4:         {url: https://github.com/dlops-io/cheese-app-v4,         pinned: 033f187}
+  babykev-walk:          {url: https://github.com/rahuldave/babykev-walk,         pinned: 82adb14, note: "guest lecture (L9), Rahul Dave"}
+  babykev:               {url: https://github.com/rahuldave/babykev,              pinned: 4a14085, note: "guest lecture (L9), Rahul Dave"}
+
+# Each lecture: its Ed lesson, the tutorials (repo + README section, or a Colab notebook), the
+# study guide in guides/ and the explainer video in the Explainer_Videos repo.
+lectures:
+  - n: 1
+    title: Virtual Environments and Virtual Machines
+    ed: https://edstem.org/us/courses/97373/lessons/166027/
+    tutorials:
+      - {name: "Tutorial 0 · Setup & Installs", repo: ac215-setup}
+      - {name: "Simple Translate · install on a VM manually", repo: simple-translate, section: "Installing App on VM Manually"}
+      - {name: "Simple Translate · install on a VM with uv", repo: simple-translate, section: "Installing App on VM using UV"}
+    guide: guides/L01-vms-venvs.md
+    video: ac215-l01-vms-venvs
+    video_status: "🎬 30 min, 2 parts"
+  - n: 2
+    title: Containers I
+    ed: https://edstem.org/us/courses/97373/lessons/166028/
+    tutorials:
+      - {name: "Simple Translate · develop with Docker, push to Docker Hub", repo: simple-translate, section: "Developing App using Containers"}
+      - {name: "Simple Translate · run the image on a VM", repo: simple-translate, section: "Running App on VM using Docker"}
+    guide: guides/L02-containers-1.md
+    video: ac215-l02-containers-1
+  - n: 3
+    title: Containers II
+    ed: https://edstem.org/us/courses/97373/lessons/166033/
+    tutorials:
+      - {name: "Mega Pipeline App", repo: mega-pipeline}
+    guide: guides/L03-containers-2-mega-pipeline.md
+    video: ac215-l03-mega-pipeline
+  - n: 4
+    title: Containers II-b
+    ed: https://edstem.org/us/courses/97373/lessons/166029/
+    tutorials:
+      - {name: "Mega Pipeline App · flexible workflow", repo: mega-pipeline, branch: flexible-workflow}
+      - {name: "Docker Compose · Port Toy App", repo: port_toy}
+    guide: guides/L04-containers-2b-flexible-workflow-ports.md
+    video: ac215-l04-flexible-workflow-ports
+  - n: 5
+    title: Introduction to RAG
+    ed: https://edstem.org/us/courses/97373/lessons/182195/
+    tutorials:
+      - {name: "LLM-RAG · vector DB + LLM", repo: llm-rag}
+    guide: guides/L05-rag.md
+    video: ac215-l05-rag
+  - n: 6
+    title: "LLM: Agents I"
+    ed: https://edstem.org/us/courses/97373/lessons/166030/
+    tutorials:
+      - {name: "Cheese Quiz (Colab)", colab: "https://colab.research.google.com/drive/14UKW-Z7kFPuCwVqyUFcLxeA1KF70fwfm?usp=sharing"}
+      - {name: "LLM-Agents", repo: llm-rag, section: "Agents"}
+      - {name: "LLM Agent · Google ADK", repo: llm-agent-google-adk}
+      - {name: "Travel Planner (Colab)", colab: "https://colab.research.google.com/drive/1I_jJEHJsVkGxNoSC1c4wEoVF2QL6vCVY?usp=sharing"}
+      - {name: "Cheese Newsletter · Harness (Colab)", colab: "https://colab.research.google.com/drive/1nnHrJ4Si3tpgUQl6HqlcwxKymV1-ecPv?usp=sharing"}
+    guide: guides/L06-agents-1.md
+    video: ac215-l06-agents-1
+  - n: 7
+    title: "LLM: Agents II"
+    ed: https://edstem.org/us/courses/97373/lessons/166031/
+    tutorials:
+      - {name: "Agent Harness", repo: agent-harness}
+      - {name: "Agent Harness (Colab)", colab: "https://colab.research.google.com/drive/1ZYMsbG0gqsbs-6Pcj8WtT3WhEa4f80EZ?usp=sharing"}
+    guide: guides/L07-agents-2-harness.md
+    video: ac215-l07-agent-harness
+  - n: 8
+    title: "LLM: Finetuning"
+    ed: https://edstem.org/us/courses/97373/lessons/166032/
+    tutorials:
+      - {name: "LLM Fine Tuning (PEFT)", repo: llm-finetuning}
+      - {name: "LLM Fine Tuning (Colab)", colab: "https://colab.research.google.com/drive/1oX3ADMHphW2v7mwV7zkEWD5oYewJZEAC"}
+    guide: guides/L08-llm-finetuning.md
+    video: ac215-l08-llm-finetuning
+  - n: 9
+    title: "Automating Software Development: CI, unit testing"
+    ed: https://edstem.org/us/courses/97373/lessons/166034/
+    tutorials:
+      - {name: "Testing with Pytest", repo: cheese-app-ci-cd, section: "Part 3: Testing with Pytest"}
+      - {name: "Automating with Pre-commit Hooks", repo: cheese-app-ci-cd, section: "Part 4: Automating with Pre-commit Hooks"}
+      - {name: "Guest lecture (Rahul Dave) · slides / tutorial app", repo: babykev-walk}
+      - {name: "Guest lecture (Rahul Dave) · project", repo: babykev}
+    guide: guides/L09-ci-testing-precommit.md
+    video: ac215-l09-ci-testing
+  - n: 10
+    title: "Connecting to the Cloud: Networking, Authentication & Storage"
+    ed: https://edstem.org/us/courses/97373/lessons/166035/
+    tutorials:
+      - {name: "Cheese App v0", repo: cheese-app-v0}
+    guide: guides/L10-cloud-connect-cheese-app-v0.md
+    video: ac215-l10-cloud-connect
+  - n: 11
+    title: "Data Labeling, Versioning and Monitoring"
+    ed: https://edstem.org/us/courses/97373/lessons/166036/
+    tutorials:
+      - {name: "Label Studio", repo: data-labeling}
+      - {name: "Data Versioning (DVC)", repo: data-versioning}
+    guide: guides/L11-data-labeling-versioning.md
+    video: ac215-l11-data-labeling-versioning
+  - n: 12
+    title: App Design
+    ed: https://edstem.org/us/courses/97373/lessons/166037/
+    tutorials: []
+  - n: 13
+    title: "Advanced Training Workflows: experiment tracking (W&B), multi-GPU, serverless training (Vertex AI)"
+    ed: https://edstem.org/us/courses/97373/lessons/166038/
+    tutorials:
+      - {name: "Cheese Classification Models (Colab)", colab: "https://colab.research.google.com/drive/1h6xRhjILxaUosXlZ5ZC1NZbP0AOHALTl?usp=sharing"}
+      - {name: "Experiment Tracking with W&B (Colab)", colab: "https://colab.research.google.com/drive/1aAE5vR9r6Syh4heZboDbQNZS048VToxS?usp=sharing"}
+      - {name: "Serverless Model Training (Vertex AI)", repo: model-training}
+    guide: guides/L13-training-workflows.md
+    video: ac215-l13-training-workflows
+  - n: 14
+    title: "Serverless Deployment: Cloud Functions, Cloud Run"
+    ed: https://edstem.org/us/courses/97373/lessons/166039/
+    tutorials:
+      - {name: "Cloud Function", repo: serverless-deployment, section: "Running App as Cloud Function"}
+      - {name: "Cloud Run", repo: serverless-deployment, section: "Running App in Cloud Run"}
+    guide: guides/L14-serverless-deployment.md
+    video: ac215-l14-serverless-deployment
+  - n: 15
+    title: ML Workflows with Vertex AI
+    ed: https://edstem.org/us/courses/97373/lessons/166040/
+    tutorials:
+      - {name: "Model Deployment (Vertex AI)", repo: model-deployment}
+      - {name: "ML Workflow (Vertex AI Pipelines)", repo: ml-workflow}
+    guide: guides/L15-vertex-ml-workflows.md
+    video: ac215-l15-vertex-ml-workflows
+  - n: 16
+    title: "System Tradeoffs: Performance, Cost, and Design Choices"
+    ed: https://edstem.org/us/courses/97373/lessons/166041/
+    tutorials: []
+  - n: 17
+    title: Evaluating and Monitoring ML Systems in Production
+    ed: https://edstem.org/us/courses/97373/lessons/166042/
+    tutorials: []
+  - n: 18
+    title: APIs + Frontend
+    ed: https://edstem.org/us/courses/97373/lessons/166043/
+    tutorials:
+      - {name: "App v1 · simple frontend with FastAPI", repo: cheese-app-v1}
+      - {name: "App v2 · FastAPI backend", repo: cheese-app-v2, section: "Tutorial 23: Backend APIs"}
+      - {name: "App v2 · simple frontend", repo: cheese-app-v2, section: "Tutorial 24: Simple Frontend App"}
+      - {name: "App v2 · React frontend", repo: cheese-app-v2, section: "Tutorial 25: React Frontend Setup"}
+    guide: guides/L18-apis-frontend.md
+    video: ac215-l18-apis-frontend
+  - n: 19
+    title: "Scaling: Kubernetes (local)"
+    ed: https://edstem.org/us/courses/97373/lessons/166044/
+    tutorials: []
+    note: "tutorial announced as coming soon on the course site"
+  - n: 20
+    title: "Deployment: Pulumi"
+    ed: https://edstem.org/us/courses/97373/lessons/166045/
+    tutorials:
+      - {name: "App v3 · deployment to GCP (manual)", repo: cheese-app-v3, section: "Deployment to GCP (Manual)"}
+      - {name: "App v3 · deployment to GCP with Pulumi (single VM)", repo: cheese-app-v3, section: "Deployment to GCP (Single VM Instance)"}
+    guide: guides/L20-deployment-pulumi.md
+    video: ac215-l20-deployment-pulumi
+  - n: 21
+    title: "Automating Software Development: CI/CD with GitHub Actions II"
+    ed: https://edstem.org/us/courses/97373/lessons/166046/
+    tutorials:
+      - {name: "GitHub Actions remote CI", repo: cheese-app-ci-cd, section: "Part 5: GitHub Actions Remote CI"}
+    guide: guides/L21-cicd-github-actions.md
+    video: ac215-l21-cicd-github-actions
+  - n: 22
+    title: "Scaling: Kubernetes (cloud)"
+    ed: https://edstem.org/us/courses/97373/lessons/166047/
+    tutorials:
+      - {name: "App v3 · deployment with scaling using Kubernetes", repo: cheese-app-v3, section: "Deployment with Scaling using Kubernetes"}
+    guide: guides/L22-kubernetes-cloud.md
+    video: ac215-l22-kubernetes-cloud
+  - n: 23
+    title: Final Deployment and Review
+    ed: https://edstem.org/us/courses/97373/lessons/166048/
+    tutorials:
+      - {name: "App v4 · CI/CD automation", repo: cheese-app-v4, section: "Cheese App - Automation"}
+    guide: guides/L23-final-cicd-deployment.md
+    video: ac215-l23-final-cicd
