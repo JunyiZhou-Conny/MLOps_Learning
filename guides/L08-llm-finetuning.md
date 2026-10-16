@@ -13,6 +13,7 @@
 - **最费时间的坑：** ① README 没说要改 code：`env.dev` 里的 `GCP_PROJECT`/`GCS_BUCKET_NAME`，`gemini-finetuner/cli.py:10-11` 写死的 `gs://cheese-dataset/...`，还有 `:107` 的 `MODEL_ENDPOINT`（instructor 的 endpoint）都要换成你自己的；bucket 要自己建，Vertex AI API 要自己 enable。② Ubuntu/Debian/WSL 上 `sh docker-shell.sh` 报 `source: not found`（`/bin/sh` 是 dash），改用 `bash docker-shell.sh`。③ `--generate` 把所有 error 都吞掉：key 没放在 repo **旁边**的 `secrets/llm-service-account.json`，五批全部失败，接着 `--prepare` 报 `KeyError: 'question'`。每一行输出都要读。
 - **Colab 的坑：** 别跳过 `!uv pip uninstall torchao`（否则 nb cell 86 merge 时会报 ImportError；这是读 peft source 推断的，没有实测）；别删 nb cell 72 的 fp32 cast（`fp16=True` 没法 unscale bf16 gradients）；改了 LoRA config 想重训，先重跑 nb cell 36 重新 load model。
 - **做完要删：** `gcloud storage rm -r gs://<bucket>/llm-finetune-dataset-small`（或者删整个 bucket）；tuned model/endpoint 在 console 里删（L10 `cheese-app-v0` 还要用，可以留到 L10 之后）；不用的 SA key 删掉；本地 `docker image rm llm-dataset-creator gemini-finetuner`；Colab 用 *Runtime → Disconnect and delete runtime*，Drive 空间不够就删 `MyDrive/LLM_cache`。
+- **Lecture slides：** 老师的 Lecture 8 slides（`L08_FineTuning_v2`，73 页）讲的是 Track B 背后的理论：instruction fine-tuning、full fine-tuning 的显存账（10B model 约 120 GB）、LoRA，再到 QLoRA（4-bit NF4 + paged optimizer，10B 约 12 GB）；Track A（Gemini managed tuning）不在 slides 里。这份 guide 各节和 slides 怎么对应、做 tutorial 需要的 10 个 lecture ideas，以及 slides 和 notebook 不一样的 8 处，都在下面的 [Lecture slides](#lecture-slides)。最要紧的两处：① slides 用 BF16 计算，notebook 为了 T4 用 FP16，并把 adapters 转回 FP32；② slides 跳过了 double quantization，notebook 打开了 `bnb_4bit_use_double_quant=True`。
 
 ## At a glance
 
@@ -73,6 +74,49 @@
 - **Path convention:** unprefixed `_api_client.py`, `_common.py`, `_transformers.py` and `types.py` are google-genai 1.39.1 files (`google/genai/…`) unless another version is named; `_default.py` is google-auth. `trl/…`, `peft/…` and `transformers/…` paths are in those packages at the versions above. `cli.py`, `Dockerfile` and `docker-shell.sh` without a folder are the files of the container the surrounding step is about.
 
 </details>
+
+## Lecture slides
+
+The instructor's deck for this lecture is *Lecture 8: LLM Finetuning* (`L08_FineTuning_v2`), 73 slides. Slide numbers are PDF page numbers; the printed footers differ, because the deck was cut from a longer one. The slides are not reproduced here; what follows is in our own words. The full slide digest and the cross-check with the video live in the Explainer_Videos repo, in `videos/ac215-l08-llm-finetuning/SLIDES.md`. The deck is the theory behind **Track B**, the QLoRA notebook: instruction tuning, the memory bill of full fine-tuning, LoRA, then QLoRA. **Track A** (Gemini, managed tuning) is not on the slides; the one shared idea is the instruction dataset. The slides answer §9's open question about what the lecture adds, except for double quantization, which they skip.
+
+**Map**
+
+| This guide | Slides |
+|---|---|
+| §1 What you build; §3.1 | 4, 6–8 (instruction fine-tuning; a tuned model's learned opener vs plain next-word prediction) |
+| §3.2; §4 Steps 6–7; checklist *Generate Question Answer Dataset* | 4–5 (the instruction dataset) |
+| §3.3 | 5, 8 (the JSONL and chat-template formats are tutorial-only) |
+| §3.4; §4 Steps 9–13; checklist *Fine-tune Gemini* | none (Track A is not on the slides); 13–16 show why full fine-tuning is hard to do yourself |
+| §3.5; §4 Steps 19–21; §5 Excerpt 9; checklist *Part B* | 43–55 (buckets, absmax, NF4), 68–69 (stored in 4 bits, computed in 16) |
+| §3.6; §4 Step 23; §5 Excerpt 11; §8 E1 | 18–35 (PEFT, LoRA, the parameter table), 41 |
+| §3.7; §5 Excerpt 12; §6.14 | 11–15, 37–39 (memory bills), 57–65 (gradient checkpointing, paged optimizer), 66–72 (BF16, QLoRA) |
+| §3.8; §4 Step 25; §8 E7 | 9–10, 36 (catastrophic forgetting), 40 (LoRA vs full fine-tuning), 51 (quantization error) |
+| §4 Step 26 | 30 (merging) |
+| §2, §6 (except 6.14), §7, §9; the Track A setup | none (tutorial-only) |
+
+Lecture-only: multi-task fine-tuning (10), the GPT-4 training-cost aside (11–12) and the PEFT family map beyond LoRA (19–20).
+
+**Lecture ideas you need for this tutorial**
+1. Fine-tuning usually means instruction fine-tuning: training on pairs of an instruction and its answer, sometimes with context. The tutorial's `instruct-dataset.csv` is the two-field case (slides 4–5).
+2. Tuning leaves habits you can see: a chat-tuned model opens with "Sure, here's…", where a plain next-word model would just continue the text. The Pavlos openers are this on purpose (slides 7–8).
+3. Full fine-tuning of a 10B model in FP16 needs about 120 GB: 20 GB of weights, 20 GB of gradients and 80 GB of FP32 Adam states (slides 13–15).
+4. LoRA freezes W₀ and learns ΔW = (α/r)·B·A in a branch beside it. B starts at zero, so training starts from the pretrained model. Here r = 8 and α = 16 (slides 22, 26–28).
+5. A low-rank pair has far fewer numbers than the matrix it updates, and only the pair trains. The slides' table treats a model as one layer; the notebook's exact count is 1,146,880 (slides 23–25, 31–35).
+6. LoRA still keeps the 16-bit base in GPU memory (about 40 GB for 10B), so QLoRA shrinks the base (slides 37–39, 43).
+7. Quantization sorts numbers into buckets: scale by the absolute maximum, round, and accept a small error when you scale back (slides 44–51).
+8. NF4 has 16 buckets, each holding an equal share of the bell-shaped weights, so precision is densest near zero (slides 54–55).
+9. Gradient checkpointing stores only some activations and recomputes the rest; the paged optimizer moves optimizer state to CPU RAM when the GPU fills up (slides 57–65).
+10. QLoRA stores W in NF4, dequantizes it to 16 bits for each matrix multiply, trains only the adapters, and can merge them into the weights at the end. A 10B model drops to about 12 GB (slides 30, 68–72).
+
+**Where the slides and the tutorial differ** (in each case, the notebook's stored run and PEFT 0.20.0 show what the code does)
+- Slides 66–72 compute in BF16 with BF16 adapters. The notebook computes in FP16 (`bnb_4bit_compute_dtype="float16"`, `fp16=True`) so that T4s work, and casts the adapters to FP32 (nb cells 31, 34, 70, 72; §3.7).
+- Slide 53 skips double quantization. The notebook turns it on with `bnb_4bit_use_double_quant=True` (§3.5).
+- Slides 27–30 draw A from a normal distribution. PEFT's default draws A from a Kaiming-uniform distribution (`"gaussian"` is opt-in). B = 0 in both, so the update still starts at zero (§3.6).
+- Slides 22 and 41 add adapters "to each layer". PEFT's Qwen3 default adapts only `q_proj` and `v_proj` in each of the 28 layers (§3.6; E1 for `all-linear`).
+- Slides 45–51 use one absmax constant for a whole array and round to Int8. bitsandbytes uses one constant per small block and 16 NF4 levels (§3.5).
+- Slides 29 and 70 say the backward pass doesn't use the pretrained weights. W₀ gets no gradient and no update, but gradients still pass through it to earlier layers (§3.7).
+- Slide 30 merges the update into the weights. The notebook merges into a freshly loaded FP16 base, not the 4-bit one, and recommends keeping the 4.6 MB adapter (nb cells 83–86; §4 Step 26).
+- Slide 25 says a higher rank gives better performance. Poll 3 (nb cell 68) adds the cost: more trainable parameters and slower training, for "potentially" better results (§3.6).
 
 ## Command checklist
 

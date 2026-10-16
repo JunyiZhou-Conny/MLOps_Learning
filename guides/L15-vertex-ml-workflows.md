@@ -60,7 +60,7 @@ The instructor's deck for this lecture is *Lecture 15: ML Workflows with Vertex 
 
 **Lecture ideas you need for this tutorial**
 1. Collector, processor and training already exist. This lecture adds Model Deploy, then automates all four (slides 6–7, 20–21).
-2. Serverless model deployment puts a trained model behind a managed endpoint (online or batch, CPU or GPU), and an online endpoint costs money for as long as it is up (slides 11, 41).
+2. Serverless model deployment puts a trained model behind a managed endpoint (online or batch, CPU or GPU), and an online endpoint costs money for as long as it is up (slide 11; slide 41's image-only "DELETE!!" reads as the clean-up reminder).
 3. Deployment takes five steps, all driven from one CLI container: get the saved model, update its signature, upload it to GCS, upload it to the Model Registry, deploy an endpoint (slides 12, 15).
 4. Put the preprocessing inside the model's serving signature so the endpoint accepts raw image bytes. Otherwise every client preprocesses a little differently ("client-side brittleness"), and one central copy is also easier to roll back (slides 13–14).
 5. Use Vertex AI Online Prediction to serve trained models, and Cloud Run when ML is one part of a larger application (slides 16–17).
@@ -76,7 +76,7 @@ The instructor's deck for this lecture is *Lecture 15: ML Workflows with Vertex 
 - Slides 12 and 15 make the signature update a deployment step. Part A does it in `--prepare`, and in the pipeline the trainer adds it as it saves; the deploy component only uploads and deploys, as slide 37's card says (the README's line 7 is wrong).
 - Slides 11, 16 and 17 promise serverless scaling. Both deploys pin one always-on node (`min_replica_count=1`, `max_replica_count=1`): it bills 24/7, never scales to zero, and each deploy makes a new endpoint (§2).
 - Slides 16–17 list versioning, A/B testing and drift detection. The tutorial uses none of them: `traffic_split={"0": 100}` on a fresh endpoint, and no monitoring job (Exercise E5 tries a split).
-- Slides 34 and 39 push images to Artifact Registry or Container Registry. The pipeline pulls public Docker Hub images (`dlops/cheese-app-*`) that are already pushed, Container Registry has been retired, and images must include amd64 (§4 B5).
+- Slide 34 pushes images to Artifact Registry or Container Registry (slide 39 lists "Build & Push Image" as a tutorial step). The pipeline pulls public Docker Hub images (`dlops/cheese-app-*`) that are already pushed, Container Registry has been retired, and images must include amd64 (§4 B5).
 - Slide 35's Dockerfile (`python:3.9-slim-buster`, `ENTRYPOINT ["uv", "shell"]`) is a sketch. The real step images use `python:3.12-slim-bookworm` and `ENTRYPOINT ["/bin/bash","docker-entrypoint.sh"]`, and uv has no `shell` command.
 - Slide 36's development branch logs in to gcloud. The step images' entrypoints just activate the venv and open bash; on Vertex the pipeline's service account supplies credentials (§3.8).
 - Slide 33's import line is not valid Python, and its `job.run()` has no arguments. The repo uses `import google.cloud.aiplatform as aip`, calls `aip.init(...)` and runs `job.run(service_account=GCS_SERVICE_ACCOUNT)`, which is why you need Service Account User (§5 excerpt 8).
