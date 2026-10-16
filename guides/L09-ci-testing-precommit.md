@@ -57,7 +57,7 @@
 
 ## Lecture slides
 
-The instructor's deck for this lecture is Rahul Dave's guest lecture *Software Development for Machine Learning* (`babykev`), 100 slides. Slide numbers are PDF page numbers, and the footers print the same numbers. The slides are not reproduced here; what follows is in our own words. The full slide digest and the cross-check with the planned video live in the Explainer_Videos repo, in `videos/ac215-l09-ci-testing/SLIDES.md`. The deck walks **Track B**, the `babykev` project, in nine parts, one per git tag `step-00` … `step-05b`. The cheese tutorial (**Track A**) appears only on slide 9, as a QR code, so its ideas reach Track A as the same idea shown on a different project.
+The instructor's deck for this lecture is Rahul Dave's guest lecture *Software Development for Machine Learning* (`babykev`), 100 slides. Slide numbers are PDF page numbers, and the footers print the same numbers. The slides are not reproduced here; what follows is in our own words. The full slide digest and the cross-check with the planned video live in the Explainer_Videos repo, in `videos/ac215-l09-ci-testing/SLIDES.md`. The deck walks **Track B**, the `babykev` project, in nine parts, one per git tag `step-00` … `step-05b`. The cheese tutorial (**Track A**) appears only on slide 9, as a QR code, so the deck's ideas reach Track A as the same idea shown on a different project.
 
 **Map**
 
@@ -84,7 +84,7 @@ Background, not needed to finish the tutorial: 1–6 (an ML project is mostly en
 
 **Lecture ideas you need for this tutorial**
 1. A gate is anything that can fail and stop a commit; the hook makes it automatic, and a commit that fails the check never happens (41, 98–99).
-2. Name a test's kind by what runs in it: unit, integration (our parts, with stand-ins for what comes from outside), end-to-end or system (the real parts), smoke, acceptance. The file or folder name doesn't decide (66, 95).
+2. Name a test's kind by what runs in it: unit, integration (our parts, with stand-ins for what comes from outside), end-to-end or system (the real parts), smoke, acceptance. The file or folder name doesn't decide (62, 66, 95).
 3. A test is hermetic when only our code can make it fail. Only hermetic checks belong in the hook, and you prove it by running them with the network switched off (65, 94, 97).
 4. A test that needs the outside world gets a marker (`system`), stays out of the default run, and is run on request, where it must pass instead of skipping (95, 97).
 5. Test normal inputs, edge cases and invalid inputs. When a good test fails, fix the code, not the test (25, 27–28).
@@ -95,7 +95,7 @@ Background, not needed to finish the tutorial: 1–6 (an ML project is mostly en
 10. All green can still be wrong: coverage counts the lines that ran, not what was checked. State the rule as a property and let hypothesis look for the failing case (73–74, 78–81).
 
 **Where the slides and today's tutorial differ** (for the cheese tutorial, follow the repo at `b8458ff`; for the walk, the `babykev` tags)
-- Slides 29–31 and 50 use ruff for formatting and linting, with one line length of 100 set in `pyproject.toml`. The cheese repo uses Black 24.1.1 and Flake8 7.0.0 at 120, passed on each command; README commands without a width get 88 and 79 (§3.4, §9 E5).
+- Slides 29–31 and 50 use ruff for formatting and linting and keep lines at 100 characters; the babykev repo sets that width once, in `pyproject.toml`. The cheese repo uses Black 24.1.1 and Flake8 7.0.0 at 120, passed on each command; README commands without a width get 88 and 79 (§3.4, §9 E5).
 - Slides 35, 41 and 43: babykev's hook runs `just check`, which includes every hermetic test over a 90% coverage floor. The cheese hook runs seven hygiene hooks, Black and Flake8, and no tests (§3.8, §9 E4).
 - Slides 29 and 35: babykev's gate only checks the format (`just fmt --check`), so the hook never edits a file. The cheese Black, trailing-whitespace and end-of-file-fixer hooks rewrite the staged file and abort the commit; `git diff`, `git add -u`, commit again (§6 G11).
 - Slide 43 pins `pre-commit-hooks` at `v6.0.0` and checks the whole project on every commit. The cheese config pins `v4.5.0`, and Black and Flake8 see only staged files under `src/`, so `tests/` is never linted (§5, §6 G15).
@@ -104,7 +104,7 @@ Background, not needed to finish the tutorial: 1–6 (an ML project is mostly en
 - Slides 14–15, 32 and 87–91: one `uv.lock`, developer tools in dependency groups, a run image built in stages without them, Python 3.13. The cheese repo has no lockfile, ships Black, Flake8, pre-commit and pytest in its one image, calls its single-`FROM` Dockerfile "Multi-stage", and uses Python 3.11 (§3.7, §9 E14, E20).
 - Slides 16, 20 and 41: one command for people, the hook and CI. In the cheese repo the hook's pinned Black, the image's newest `black>=24.1.1` and the README's width-less commands are three different checks (§6 G9, G14).
 - Slide 35 fails the gate below 90% coverage. The cheese repo measures coverage for the unit tests only and sets no floor; Milestone 5 asks for 70% (§3.6).
-- The cheese files cite "L17, Slide …" and "L18, Slide …" (`.pre-commit-config.yaml:2`, `:28`, `:37`; `pytest.ini:2`; `test_api.py:4`), a previous year's decks. In this deck pre-commit is slides 34 and 41–44, the formatter 29, the linter 30 (§9 E12).
+- The cheese files cite "L17, Slide …" (`.pre-commit-config.yaml:2`, `:28`, `:37`) and L18 (`pytest.ini:2`; "L18, Slide 11-12" in `test_api.py:4`), a previous year's decks. In this deck pre-commit is slides 34 and 41–44, the formatter 29, the linter 30 (§9 E12).
 - Slide 32, a step-02 slide, shows the final dependency groups. At the `step-02` tag they hold only pytest, pytest-cov and ruff; the other tools arrive at `step-03`, `step-05` and `step-05b`.
 
 ## Command checklist
