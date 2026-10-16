@@ -13,6 +13,7 @@
 - **最费时间的坑：** ① `README.md:162` 写的 `/run-deploy-app` 什么都不 deploy：它匹配的是 `/run-`，触发 ML workflow，然后三个 step 全部 skip。要写 `/deploy-app`。② instructor 的 `ac215-project`、bucket 名和 SA email hard-code 在两个 workflow YAML、三个 `Pulumi.dev.yaml` 和两个 `docker-shell.sh`（`src/deployment/`、`src/workflow/`）里，README 只提了一处（`README.md:78`）；全部改完，先用**不带** keyword 的 commit push。③ v4 的 `deploy_k8s/Pulumi.dev.yaml:7` 打开了 `setupSSL`，第一次 v4 `pulumi up` 会把 L22 的 NGINX ingress 换成 Google HTTPS load balancer：IP 变了，README 说的 `nginx_ingress_ip` 这个 output 根本不存在（看 `app_url`），managed certificate 也要等一阵才 Active。
 - **其他会骗你的地方：** `deploy-k8s-update.sh` 没有 `set -e`，image build 失败了 run 照样可能是绿的；CI 不会重新 build data-collector / data-processor image（只有手动 `sh deploy-ml-images.sh` 会）；`/run-ml-pipeline` 每次都新建一个 Vertex endpoint（`n1-standard-4`，24/7 计费），而 app 根本不调用它。
 - **做完要删：** 在 deployment container 里 `cd /app/deploy_k8s && pulumi destroy --stack dev --refresh -y`（regional GKE cluster、node、static IP + HTTPS LB、Cloud NAT、PVC disk）；Vertex AI 里每个 endpoint 先 undeploy model 再 delete；手动删 Artifact Registry 的旧 tag（`retain_on_delete=True`，destroy 不会删）；最后删掉 GitHub 上的 `GOOGLE_APPLICATION_CREDENTIALS` secret 和 `deployment` key，或者 disable 两个 workflow。
+- **Lecture slides：** 老师的 Lecture 23 slides（38 页：motivation、automation 也就是 CI/CD、整门课的 review）和这份 guide 各节怎么对应、做 tutorial 需要的 9 个 lecture ideas，以及 slides 和今天 repo 不一样的 9 处，都在下面的 [Lecture slides](#lecture-slides)。最要紧的两处：① slides 17–18 说一个 deployment container 包办 build image、跑 Vertex AI pipeline、deploy 到 K8s；v4 其实是两个 workflow、两个 container：`deployment` 只管 app（跑 `deploy-k8s-update.sh`），Vertex pipeline 由单独的 `workflow` container 提交，CI 也不会重新 build data-collector / data-processor image。② slides 11–12 用"有没有人按 release"来区分 continuous delivery 和 continuous deployment：在 v4 里，在 commit message 里打 `/deploy-app` 的人就是在按 release 按钮，而且前面一个 test 都没有；MS5 要的"merge 到 `main` 就 deploy、先过 tests"才是 continuous deployment。
 
 ## At a glance
 
@@ -73,6 +74,49 @@ Paths without a repo prefix are relative to `cheese-app-v4/`, and every `path:li
 - **Colab notebooks:** none.
 
 </details>
+
+## Lecture slides
+
+The instructor's deck for this lecture is *Lecture 23: Final Deployment and Review*, 38 slides. Slide numbers are PDF page numbers; a few slides pasted in from other decks print a different footer number. The slides are not reproduced here; what follows is in our own words. The full slide digest and the cross-check with the planned video live in the Explainer_Videos repo, in `videos/ac215-l23-final-cicd/SLIDES.md`. After one motivation slide (4), the deck has two parts: automation, that is CI/CD and how the cheese app does it (5–20), and a review of the whole course, one picture per earlier lecture (21–37). The review slides print lecture numbers from another year's schedule; the Pointers in `SLIDES.md` map them to this year's lectures.
+
+**Map**
+
+| This guide | Slides |
+|---|---|
+| At a glance; §1 What you build | 19 (the cheese app's CI/CD map); 17–18 (GitHub Actions builds and runs the deployment container); 20 (the tutorial slide: workflow file, `/deploy-app`) |
+| Checklist "Continuous Integration and Continuous Deployment (CI/CD)"; §3.1 | 7–12, 36 (the CI/CD loop; CI defined; delivery vs deployment) |
+| §3.2 The trigger; checklist "Frontend & Backend Changes"; §4 D4; §6 #1 | 18, 20 |
+| §3.3 The toolbox container; §4 B1, D5; §8 E6 | 17–18; 35 (in development, the source code is mounted into the containers) |
+| §3.4 Timestamp tags and the rolling update; §4 D6 | 18 (build and push images for release, then deploy them to the cluster); 19, 36 (Build, Release, Deploy) |
+| §3.7 Two loops, one map | 19; 5–6 (the five operations to automate) |
+| §3.8 The load balancer; §4 B4 | 37 (L22's NGINX routing) |
+| Checklist "ML Component Changes"; §4 Part E | 5–6; 13–15 (CI and CD for ML); 17–18; 32–34 (training jobs, model deployment, the four-step pipeline) |
+| §2 Costs; §4 Part F | 15 (cost as a challenge of CD for ML) |
+| §7 Where this sits in the course; §8 E7 (MS5) | 21–37 (the review); 8–12, 36 (the missing CI half, and what continuous deployment adds); 13–15 (validation and retraining) |
+| §3.5 Shared state, §3.6 Identity, §5 Code tour, §6 (except #1), §9 Errata | none (tutorial-only) |
+| Background, not needed to finish the tutorial | 4 (a joke turkey-timer prediction app as motivation); 16 (six CI/CD services); 22–31 (the review of environments and containers, the audio pipeline, labeling, ChatGPT's training, RAG, agents, LoRA, distillation) |
+
+**Lecture ideas you need for this tutorial**
+1. Automate five operations: data pipeline jobs, model training and deployment, frontend deployment, backend deployment, and building and pushing images (5–6). v4 automates all of them except building the two ML step images (§6 #3), and it deploys frontend and backend only together.
+2. CI/CD is one loop: commits → build → test → (release →) deploy → monitor, with every stage notifying the developers (7, 36). v4 wires the deploy half; the run's colour is its only notification, and it can be green when the image build failed (§6 #4).
+3. CI runs scripts on every push: automated tests, coding standards (style and consistency) and static analysis (defects and vulnerabilities, found without running the code) (8–10). None of them run here; L21's `ci.yml` is that half.
+4. Delivery vs deployment is whether a person presses release (11–12). Typing `/deploy-app` is that person; deploying on every merge to `main`, behind tests, is continuous deployment (MS5, §8 E7).
+5. CI/CD for ML integrates code, data and models; it should catch data-quality, code and model-performance problems, balance frequent runs against training cost, and release a model only when its metrics stay within tolerance, watching for data drift (13–15). v4's ML lane checks no metric before it deploys (§3.7).
+6. Don't build new machinery: the deployment container already builds images and deploys to the cluster, so GitHub Actions only builds and runs it on each commit (17–18, §3.3).
+7. The cheese app's map: Dev Team → GitHub → GitHub Actions (Build, Deploy) → Google Cloud (Storage, Vertex AI, Kubernetes) → users, over the chain Data Collector → Data Processor → Model Training → Model Deploy → Backend API → Frontend (19, §1).
+8. The trigger: a workflow file in `.github/workflows` defines the steps, and `/deploy-app` in the commit message starts them (20, §3.2).
+9. The final app is the course: every earlier lecture built one of its boxes (21–37, §7's recap map).
+
+**Where the slides and today's tutorial differ** (in each case, follow the repo at `033f187`)
+- Slides 17–18 have one deployment container build the images, run the Vertex AI jobs and deploy, through a CLI. Here the app workflow runs the script `deploy-k8s-update.sh` in `deployment`, a separate `workflow` container submits the Vertex pipelines, and CI never rebuilds the ML step images (§3.3, §6 #3); the slides match the repo's older `pipenv` branch.
+- Slide 19, like the README's `images/ci-cd.png`, draws one chain from Model Deploy into the Backend API. In the code the two lanes don't touch: the API loads a fixed model from a GitHub release, and each pipeline run deploys to a new endpoint that nothing calls (§3.7, §9 erratum 8).
+- Slide 19's GitHub Actions box holds Build → Deploy; the README's copy of the picture, and slide 36, add Release. The code has no separate release step: `deploy_images` builds and pushes the timestamp-tagged images, and `deploy_k8s` deploys them (§5 Excerpt 6).
+- Slide 20 and slides 7/36 present CI/CD with Test and Monitor stages. No test, lint or monitoring step runs in either workflow; `README.md:157` says the CI part is not implemented, and slide 18's own heading says "How to Implement CD" (§3.1).
+- Slides 11–12 define delivery as keeping a person who decides to release, and deployment as fully automatic; the README defines delivery as automated delivery to staging and calls this tutorial continuous deployment. In the code a person releases by typing the keyword, and nothing is tested first (§3.1).
+- Slide 20's keyword is `/deploy-app`, which matches the workflow; `README.md:162`'s `/run-deploy-app` deploys nothing (§6 #1).
+- Slide 20's basic format starts with a bare `git add`, which stages nothing ("Nothing specified, nothing added."); use the README's `git add .`.
+- Slide 37 (the L22 review) routes `/api/` through an NGINX ingress controller to NodePort Services. v4 uses a Google HTTPS load balancer at `https://<static-ip>.sslip.io`, routes `/api-service`, and its Services are ClusterIP (§3.8, §6 #6).
+- Slide 33 (the L15 review) has a deployment container update the model's signature before uploading it. In v4's pipeline the trainer adds the signature, and Model Deploy only uploads to the Model Registry and deploys, to a new endpoint on every run (§4 E3, §6 #15).
 
 ## Command checklist
 

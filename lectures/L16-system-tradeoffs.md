@@ -4,6 +4,17 @@ Source: one deck, `L16_system_tradeoffs_updated` (81 slides; title slide: AC215 
 
 **What kind of lecture this is.** It covers architecture and operations, with no code walkthrough. It builds one running example, a FastAPI `/predict` service (labelled "Python 3.14"), a ChromaDB vector store and a React/Vite or Next.js frontend, from a laptop process up to a three-subnet AWS VPC. It then compares the managed compute, frontend, data and identity services you could run them on, and ends with a five-step decision method. The examples are **AWS-first** (EC2, ECR, ALB, Route 53, ECS, Fargate, EKS, Lambda, CloudFront, RDS), with Google Cloud equivalents on slides 34, 50–51, 55–56, 59 and 68. The tutorials all use GCP. The title promises "Performance, Cost", but the slides give **no prices and no benchmark numbers**. Each trade-off appears as an *operating contract*: which layer the provider runs and which the team still configures.
 
+## 中文速览
+
+- **这一讲讲什么：** L16 没有 tutorial，也没有 video，只有一份 81 页的 slides（"System Tradeoffs: Performance, Cost, and Design Choices"）。全程用同一个例子：FastAPI 的 `/predict` service、ChromaDB 和一个 React/Vite 或 Next.js frontend，从 laptop 搬进一个分三层 subnet 的 AWS VPC，再比较 compute、frontend、data、identity 的各种 managed service，最后给一个五步的 decision method。例子以 AWS 为主（GCP 对照在 slides 34、50–51、55–56、59、68）。标题写了 "Performance, Cost"，但 slides 里没有一个价格或 benchmark 数字；每个 trade-off 都写成一份 operating contract：provider 管哪一层，team 还要自己配哪一层。
+- **Idea 1 · 网络基础（4–16）：** 有 public IP 不等于 reachable，route 和 firewall 都要放行（4、13）。CIDR 的 address 数是 2^(32 − prefix)，`10.0.0.0/12` 有 1,048,576 个（7）。outbound 连接的 source port 由 OS 挑，reply 能回来是因为 stateful firewall（9）；自己的 app 要用一个明确的 user port（10）。security group 只有 allow rule（11）。route table 里 `0.0.0.0/0` 指向 Internet Gateway 就是 public subnet，指向 NAT Gateway 就是 private subnet（13）；NAT 只让 private server 往外连，不接 inbound（14）。VPC 分 public、private app、private data 三层（16）。
+- **Idea 2 · container 上 cloud（17–26）：** image 只 build 一次，push 到 registry（ECR），每次 deploy 都 pull 同一个 tag `myapp:v1.4`（17、29）。`-p 8080:8000` 里 host port 和 container 里的 listener 分开配（19）；SSH 是 admin access，到的是 machine，HTTPS `:443` 是 client access，到的是 service（20）。config 在 startup 时注入，secret 从 secret manager 交给 workload identity，"Inject, Don't Bake"（21–22）。前门（Nginx 或 ALB）放在 public subnet，FastAPI 没有 public IP（23–24）；HTTPS 保护的是 public 那一段，TLS 在前门结束（25–26）。
+- **Idea 3 · 一个 request 走三份 contract（27–32）：** 先 DNS（resolver → Route 53 → ALB 的 IP），再 browser →（HTTPS）→ ALB →（HTTP）→ FastAPI →（SQL）→ database（27–28）。browser 先下载 frontend 的 HTML/CSS/JS，然后是 browser 自己去 call API（30）。部署有两种 layout：两个 hostname，或者一个 hostname 按 path 分流（32）；cheese app 在 L20/L22 用的是后者（`/api-service`）。
+- **Idea 4 · cloud service spectrum（34–59）：** compute capacity（EC2、Fargate）和 orchestration（ECS、Kubernetes）是两层（34）。ECS 一直把 actual state 拉回 desired count（43）；workload scaling（task 数）和 capacity scaling（有没有地方放）是两回事，capacity 跟不上，task 就 pending（45）。Cloud Run 把这几层合成一个 service（50）；function 适合 triggered、短小、bounded 的工作，warm instance 不是 durable state（53–54）。slide 58 的 ladder：越往右 provider 接手的层越多，但 security、tenancy、data、recovery 永远是你的。
+- **Idea 5 · compute 以外（61–73）：** static frontend 放 CDN，在 VPC 外面，只有 API request 才进 ALB（62–64）。vector data 放哪里，决定谁来 operate 和 recover：自己在 VM 上跑 ChromaDB、managed PostgreSQL + pgvector，或者 vector search service（65–66）；managed database 的 HA 和 backup 要自己 configure，不是 default（67–68）。authentication（token 证明你是谁）≠ authorization（app 还要查 role 和 ownership）（69–70）。同一份 Next.js code 有 static export、Node/container、platform adapter 三种 contract，选最简单够用的那个（72–73）。
+- **Idea 6 · 怎么选（75–81）：** trace the request → name the contract → choose the boundary → select a service → measure and revise（80）。先画 frontend → backend → data → identity，再谈 service 名字（75）；data 比 compute 活得久（76）；prototype 求 iteration，production 求 reliability，security 每个 stage 都要（77–78）；只有量出来真的需要，才加 complexity（80）。
+- **和 tutorials 对上的地方：** tutorials 全在 GCP。security group ≈ L20 的 VPC firewall rule，NAT ≈ L22 的 Cloud NAT，ECS/EKS ≈ L22 的 GKE，Cloud Run 和 Cloud Run functions 在 L14，HTTPS 前门要到 L23 的 Google-managed certificate 才有。tutorials 没有 Secret Manager（本地 mount `secrets/` 里的 JSON key，cloud 上用 attached service account 或 L22 的 Workload Identity），没有 CDN，没有 Fargate 那样的 capacity，没有 managed PostgreSQL，cheese app 也没有 user sign-in。32 个 key ideas 里有 29 个在某个 tutorial 里用到；每个 idea 在哪个 guide 的哪一节，见文末的 [Where this shows up in the tutorials](#where-this-shows-up-in-the-tutorials)。
+
 ## Outline
 
 - Slide 1 · title
@@ -190,7 +201,7 @@ All 81 slides are covered above.
 | Runtime values; immutable image | 21 | config injected at start | tutorials use `.env` files and `docker run -e` / env in compose |
 | Secret manager; workload identity; "authorized delivery"; "Inject, Don't Bake" | 22 | secrets delivered at runtime to an identity | tutorials mount **service-account JSON key files** from a `secrets/` folder (L10, L18, L20). L22 switches to GKE **Workload Identity**, the lecture's model |
 | Front door; Nginx; ALB; listener; target group (`fastapi-tg`) | 23–24, 32 | the public entry that forwards to private services | L20: **nginx reverse proxy** on port 80; L22: **NGINX Ingress Controller** behind a GCP network load balancer |
-| On-path attacker; TLS; "TLS ends here"; ciphertext | 25–26 | why the public hop needs HTTPS | the tutorials end on plain HTTP (`http://<ip>/`, `http://<LB-IP>.sslip.io`); L22's HTTPS path exists in code but is switched off |
+| On-path attacker; TLS; "TLS ends here"; ciphertext | 25–26 | why the public hop needs HTTPS | L20 and L22 end on plain HTTP (`http://<ip>/`, `http://<LB-IP>.sslip.io`); L22's HTTPS path exists in code but is switched off, and L23 switches it on (a Google-managed certificate) |
 | Resolver; authoritative DNS; Route 53; `A` alias record | 27 | name → ALB IP | L22 uses `sslip.io` wildcard DNS instead of a real zone |
 | "Three contracts" (HTTPS, HTTP, SQL) | 28 | one request, three protocols | — |
 | Frontend / backend; React + Vite; Next.js; `dist/`; static files; app vs. api hostnames; path rules | 30–32, 61 | frontend build outputs and layouts | the cheese app uses a **Next.js** frontend (port 3000) and FastAPI `api-service` (port **9000**, not 8000). L20/L22 use one hostname with the path prefix `/api-service`, which is the lecture's layout B |
@@ -283,4 +294,155 @@ Short items, verbatim, with slide numbers. The slides contain no full programs.
 - **Internal forward pointer:** slide 18's footer leads into slides 19–20 (trace the laptop port mapping, then add a public cloud endpoint).
 - **Services named, for further reading:** AWS: ECR (17, 29), EC2 (18, 20, 23–24, 34–37, 40), ALB (24–29, 32, 64, 71), Route 53 (27), ECS (34, 38, 43–46, 49–51), Fargate (34, 38–40, 42, 44, 46, 51), EKS (34, 38, 47–49), Lambda (55–56, 58–59), CloudFront (61–62), RDS for PostgreSQL and Aurora PostgreSQL-compatible (68). Google Cloud: GKE (34, 59), Cloud Run (50–51, 58–59), Cloud Run functions (55–56, 59), Compute Engine (59), Cloud SQL for PostgreSQL and AlloyDB for PostgreSQL (68). Other: Cloudflare resolver `1.1.1.1` (27), pgvector (65–66, 71, 76).
 - **No URLs or links** appear on the slides. `app.example.com` / `api.example.com` are placeholder hostnames.
-- *Ours, cross-references within this series:* ports and `-p` → L02/L04 guides; service accounts and CORS → L10; Cloud Run, concurrency and cold starts → L14; FastAPI + Next.js cheese app → L18; single VM + nginx + firewall rules + Artifact Registry → L20; private GKE nodes, Cloud NAT, ingress and load balancer → L22.
+- *Ours, cross-references within this series:* ports and `-p` → L02/L04 guides; service accounts and CORS → L10; Cloud Run, concurrency and cold starts → L14; FastAPI + Next.js cheese app → L18; single VM + nginx + firewall rules + Artifact Registry → L20; private GKE nodes, Cloud NAT, ingress and load balancer → L22. The section below maps every key idea to guide sections.
+
+## Where this shows up in the tutorials
+
+L16 has no tutorial and no video of its own, but nearly every slide names something that a deployment tutorial builds, on Google Cloud instead of AWS. The first table takes each key idea above and lists the study-guide sections where a tutorial puts it into practice. "[L20] §3.8" means section 3.8 of that lecture's study guide, "[L04] C7" concept C7 of the L04 guide, "§8 E5" exercise E5, "§6 item 12" gotcha 12, and "slide notes" the guide's *Lecture slides* section. Where the GCP service differs from the AWS one on the slide, the *Terms* table above has the details. The video folder for each guide is listed at the end.
+
+### Key ideas → tutorials
+
+| # | Key idea (slides) | Where the tutorials apply it |
+|---|---|---|
+| 1 | Deployment adds an endpoint and a lifecycle (3) | [L01] §3.1: a VM is rented, set up and deleted, so the app no longer lives and dies with your laptop. [L02] §4 Part C: the same image runs on a VM. The endpoints: a Cloud Run URL ([L14] At a glance), `http://<instance_ip>/` ([L20] §1), `http://<LB-IP>.sslip.io` ([L22] At a glance), and an HTTPS address only in [L23] §3.8. [L14] §3.1: on serverless the platform, not you, decides when an instance exists. |
+| 2 | An address alone does not make a server reachable; loopback, bind-all, private ranges (4, 8) | Internal vs external IP: [L01] §3.1. [L20] §1: the VM has an external IP, yet the ports 3000, 8000 and 9000 it publishes stay unreachable because the firewall opens only 80, 443 and 22. [L22] §3.1: private nodes have no external IP at all. `0.0.0.0` vs `127.0.0.1` inside a container: [L10] §3.5, [L18] §3.3, [L14] §3.5, and [L04] §8 C2 (a "safer" `127.0.0.1` bind breaks the published port). Private ranges: Docker's `toynet` got `172.19.0.0/16` ([L04] C6), and [L22] §9 item 11 notes that the cluster's control-plane block `172.0.0.0/28` lies outside RFC 1918's `172.16.0.0/12`. |
+| 3 | CIDR: count the varying bits (5–7) | Used, never explained. L22's subnet is `10.0.0.0/19` ([L22] §1, §4 Part C), so 13 varying bits and 8,192 addresses (*ours*), and the control plane gets a `/28` ([L22] §5 Excerpt 2). Docker's `toynet` bridge is a `/16` ([L04] C6). L20's VPC uses auto-mode subnets and writes no CIDR ([L20] §4 B10). |
+| 4 | The initiator sets the direction; ephemeral source ports; stateful replies (9) | [L04] C7: the processor sees the source port the OS gave the gateway (captured 55620, then 55634). Outbound calls from the API to Vertex AI and Chroma: [L18] §3.5. Outbound-only Cloud NAT: [L22] §5 Excerpt 1. *Ours*: GCP firewall rules are stateful too, which is why L20 defines only inbound rules ([L20] §5 Excerpt 6) and the replies still get out. |
+| 5 | Port ranges; choose an explicit application port (10) | Every service has a fixed port in the user range: API 9000, frontend 3000, Chroma 8000 ([L10] §3.5, [L18] §3.5). Cloud Run injects `PORT`, 8080 by default ([L14] §3.5, §8 E1). Host-port collisions ("port is already allocated"): [L04] C7. No guide discusses the OS's ephemeral range. |
+| 6 | A security group is an allow-list on the door (11) | GCP's version is the VPC firewall rule: [L20] §5 Excerpt 6 (`allow-http`: tcp:80 from `0.0.0.0/0` to VMs tagged `http-server`), [L20] §4 A3 (the console's "Allow HTTP/HTTPS traffic" boxes add those tags), [L20] §1 (rules for 80, 443 and 22 only). [L20] §6 item 19: the SSH rule is open to `0.0.0.0/0`, the opposite of slide 11's "narrow it". GKE adds its own `k8s-…` rules for the load balancer ([L22] At a glance, teardown step 2). |
+| 7 | A route table makes a subnet public or private (12–13) | GCP subnets are neither: a VM is public when it has an external IP and a firewall rule lets traffic in, as L20's does ([L20] §1). L22 makes the nodes private (`enable_private_nodes`, [L22] §3.1, §5 Excerpt 2) and reaches Google APIs through Private Google Access instead of a public route ([L22] §5 Excerpt 1). |
+| 8 | NAT lets private servers call out but not be called (14) | [L22] §3.1 and §5 Excerpt 1: Cloud Router plus Cloud NAT let the private nodes pull images from Docker Hub and download from GitHub. Inbound traffic arrives only through the load balancer. |
+| 9 | A VPC carved into tiers (15–16) | Both deployments create their own VPC: `cheese-app-network` with auto subnets ([L20] §4 B10) and `cheese-app-vpc` with one subnet ([L22] §1). Neither splits app and data into subnets. The tiers come from elsewhere: on the VM only nginx's ports pass the firewall ([L20] §1); on GKE only the ingress controller's Service has an external IP, while `frontend`, `api` and `vector-db` are ClusterIP ([L22] §3.3–3.4). |
+| 10 | Build once; the registry is the deployment handoff (17, 29) | Push to a registry: [L02] §3.1 and §4 Part B (Docker Hub); [L14] §3.6 (Artifact Registry; a deploy pins the tag to a digest, §8 E8); [L20] §3.5 (timestamp tags handed to the VM stack through `StackReference`); [L23] §3.4 (a new tag rolls the Deployments) and §8 E8 (the same tag found in three places). Build once, test the same bits: [L21] §3.3 (one SHA-tagged image loaded by every job). Region: an Artifact Registry location is a region or a multi-region ([L14] §3.6); the cheese app pushes to the multi-region `us-docker.pkg.dev` ([L20] §1). No tutorial scans images. |
+| 11 | The host port and the app's listen port are set separately (18–19) | `-p host:container`: [L04] C7 and §8 Q4 (`-p 127.0.0.1:8095:9100`), [L10] §3.5 (`3200→3000`), [L18] §3.5. Same image, different host: [L02] §4 Part C, plus the catch slide 18 leaves out, the CPU architecture ([L02] §3.7, §8 C4). On Cloud Run `-p` means nothing; the platform sets `PORT` ([L14] §3.5). L18 slide notes, idea 10: in production only the outer address and ports change. |
+| 12 | Administrative access ≠ client access (20) | Admin: SSH from the browser ([L01] At a glance), SSH with OS Login as `sa_…` ([L20] §3.7), Pulumi driving Docker over SSH ([L20] §3.6). Client: the browser at `http://<ip>/` ([L20] §4 A9). On GKE the admin path is the Kubernetes API through `gke-gcloud-auth-plugin` and the client path is the load balancer ([L22] §3.7, §3.4). |
+| 13 | One immutable image; configuration and secrets injected at startup (21–22) | Runtime values: `DEV=1` vs the production server in the same API image ([L18] §3.3); `ROOT_PATH` unset on the VM and `/api-service` on GKE ([L20] §3.8, [L22] §3.4). Counter-example: `NEXT_PUBLIC_BASE_API_URL` is compiled into the frontend image at build time ([L20] §3.8). Secrets mounted, not baked: [L10] §3.4, [L04] C4. How a key gets baked anyway: [L03] §3.8, [L02] §8 D3, and a W&B key in a job spec ([L13] §6 item 14, which suggests Secret Manager). CI: repository secrets ([L21] §3.8). No key file at all: [L14] §3.7, [L15] §3.8, and Workload Identity, the slide's "workload identity" ([L22] §3.7, §8 E7). Least privilege: [L10] §8 E6; [L20] §3.7 notes that the VM runs as the powerful `deployment` account. No tutorial uses Secret Manager. |
+| 14 | A front door in the public tier keeps the app private (23–24) | nginx on port 80 in front of `api-service:9000` and `frontend:3000` ([L20] §3.8, §1); the NGINX Ingress controller behind a GCP network load balancer ([L22] §3.4); a Google HTTPS load balancer created from a `gce` Ingress ([L23] §3.8, §5 Excerpt 10). [L23] §3.8's "a doorman you hire" vs "Google's front desk" is slide 24's Nginx vs ALB: the provider takes over the proxy hosts, and you still write the path rules (`/api-service` → API, `/` → frontend). |
+| 15 | HTTPS protects the public hop; TLS ends at the front door (25–26) | Only [L23] §3.8 and §5 Excerpt 10: a Google-managed certificate, an HTTP→HTTPS redirect, TLS ending at the load balancer and plain HTTP to the Pods behind it. L20 and L22 serve plain HTTP on port 80, although L20 opens 443 ([L20] §1). The app's own calls to Vertex AI always go over HTTPS with a bearer token ([L10] §3.2). |
+| 16 | DNS comes before the connection (27) | [L22] §3.4 step 1: sslip.io answers with the IP written in the name. [L22] §8 E4: the raw IP gets an NGINX 404 because the Ingress matches the Host header. [L23] §3.8: the managed certificate is issued for `<ip>.sslip.io` or your domain. No tutorial creates a DNS zone. |
+| 17 | One request crosses three contracts (28) | Trace exercises: [L20] §8 E5 (browser → firewall → nginx → Docker DNS → uvicorn) and [L22] §3.4 (DNS → load balancer → NGINX → Service → Pod). In the cheese app the data hop is Chroma's HTTP API on port 8000, not SQL ([L05] §3.8, [L18] §3.5, [L22] §3.3). |
+| 18 | The browser loads the frontend, then calls the API itself; two runtime layouts (30–32) | The browser is the integrator: [L10] §3.6, [L18] §3.5, L18 slide notes idea 7 (two round trips). Static files vs a framework: [L18] §3.7 (`http-server` serves plain HTML/JS; the React app runs on Next.js). Layout B, one hostname with path rules: [L20] §3.8, [L22] §3.4 steps 3–6. In development the API and frontend sit on two origins, which is why CORS appears ([L18] §3.4). |
+| 19 | Compute capacity and orchestration are separate layers; the task/pod wrapper (34, 38, 41–42) | [L22] §3.1 (a control plane plus node pools of VMs) and §3.2 (a Pod is the smallest schedulable unit: containers sharing one IP and volumes). |
+| 20 | EC2 sells an instance contract; one VM per service vs all on one VM (35–37) | The contract: [L01] §3.1 (machine type, zone, boot image, network interface; you run `apt` yourself). Slide 36's prototype is L20: five containers on one `n2d-standard-2` VM behind nginx ([L20] §1). One reboot: [L20] §8 E7 and §6 item 12 (the frontend has no restart policy and stays down). L22 slide notes, idea 1: one VM is a single point of failure. One difference: L20 still publishes 3000, 8000 and 9000 on the host, where slide 36 publishes no host port; the firewall closes them instead ([L20] §1). |
+| 21 | Fargate: capacity without a host to manage (38–40) | Not applied. L22 uses GKE Standard node pools, whose VMs you choose and pay for ([L22] §3.1). The nearest "no host to manage" runtimes in the course are Cloud Run ([L14] §3.1) and Vertex AI custom jobs, which create and delete a VM per job ([L13] §3.4). |
+| 22 | ECS reconciles desired state; what / how many / where; workload vs capacity scaling (43–47) | Slide 43 on Kubernetes: delete a Pod and the ReplicaSet replaces it ([L22] §3.2, §8 E1). Slide 45: Pods stay Pending until the node autoscaler adds a node ([L22] §3.6, §8 E2). The control plane is Google's and is reached over HTTPS ([L22] §3.1). A laptop-sized reconciler: Docker Compose ([L04] C8). |
+| 23 | Managed Kubernetes still leaves nodes, add-ons and policy to the team (47–49) | Everything `deploy_k8s` writes is slide 48's team column: the node pool and its autoscaler ([L22] §5 Excerpt 3), an add-on installed with Helm, the NGINX Ingress controller ([L22] §3.8), and IAM with Workload Identity, including a role the README forgets ([L22] §2, §3.7). The ECS-or-EKS choice itself has no GCP counterpart in the course. |
+| 24 | Cloud Run merges the layers; scaling = signal → policy → desired count → capacity (50–52) | [L14] §3.1 (instances ≈ in-flight requests ÷ concurrency, clamped between min and max) and §3.2 (min instances vs cold starts). On GKE the chain is the HPA (CPU measured against the requests) plus the node autoscaler ([L22] §3.6, §8 E6); the repo itself has only the node autoscaler. A downstream limit: a ReadWriteOnce disk blocks a second API replica on another node ([L22] §3.5). |
+| 25 | Functions suit triggered, short, bounded work (53–56) | [L14] §3.4 (a Cloud Run function is a container built for you), §3.8 (a Cloud Run job for run-to-completion work), §3.1 (instances are amnesiacs: warm is not durable), §3.2 (cold starts), §8 E6 (concurrency 80 vs 1 changes the instance count and the bill about 20×). |
+| 26 | A managed service hands over one named layer, not the whole job (57–59) | The course climbs the same ladder on GCP; see the table after this one. |
+| 27 | Static frontends sit outside the VPC, on a CDN (61–64) | Not applied. Every deployment serves the frontend from a container behind the same front door as the API ([L20] §1, [L22] §3.4). The simple frontend is plain static files that a CDN could serve ([L18] §3.7); the only CDN in the course is the one that page loads axios from. |
+| 28 | Where vector data lives decides who operates and recovers it (65–68) | The course takes slide 65's first option, ChromaDB that you run: in Compose ([L05] §3.4, §3.8), on the VM with a 50 GB data disk ([L20] §1), on GKE with a PVC ([L22] §3.5). Running it yourself means recovery is your job, and [L20] §6 item 23 shows it silently failing: the data is not on the disk, and only the reloading loader hides that. No tutorial uses managed PostgreSQL or pgvector; L18's APIs deck lists a `postgres-db` service that v2 does not have (L18 slide notes). |
+| 29 | Authentication is not authorization (69–70) | Applied to software, not to users: the cheese app has no sign-in. The split is the same. A key or token proves *who* (a missing key gives `DefaultCredentialsError` or a 401), IAM decides *what* (a 403): [L03] §3.6, [L04] C4, [L10] §3.2–3.3 and §8 E3. Cloud Run separates who may call the service from who the service is ([L14] §3.7, §8 E7). |
+| 30 | The complete picture is a request path (71) | The course's end state is [L23] §3.8 on top of [L22] §1: a Google HTTPS load balancer, frontend and API Pods on private nodes, and ChromaDB on a persistent disk. Slide 71's one-zone caveat applies: L22's control plane is regional, but its node pool sits in one zone, `us-central1-a` ([L22] §3.1). |
+| 31 | One Next.js codebase, three runtime contracts (72–73) | The course always takes the Node/container contract: a production Next.js server on port 3000 ([L20] §1; `node server.js` in the [L22] §1 diagram), and `next dev` in a container while developing ([L18] §3.8). Static export and platform adapters are not used. |
+| 32 | The decision method: trace, contract, boundary, service, measure (75–81) | Not applied as a method: no tutorial asks for slide 79's worksheet. The course's own path is an instance of slides 77–78: one VM as the prototype ([L20]), then a cluster with private nodes ([L22]), then automation and HTTPS ([L23]). [L23] §7 maps which lecture built which box. |
+
+29 of the 32 ideas are applied in at least one tutorial. Ideas 21 (Fargate), 27 (CDN) and 32 (the decision method as an exercise) are not.
+
+### The slide 58 ladder on the course's runtimes
+
+Slide 59 pairs the AWS services with their Google Cloud neighbours. This table goes one step further and names the tutorial that uses each rung.
+
+| Rung (slide 58) | Provider operates (slide 58) | Where the course uses the GCP neighbour | What you still do there |
+|---|---|---|---|
+| EC2 | hardware, hypervisor | Compute Engine VM: [L01], [L02] §4 Part C, [L20] | the guest OS, Docker, the data disk, the containers, the firewall ([L20] §3.6, §4 B10) |
+| ECS/EKS + EC2 | control plane | GKE Standard: [L22] | node pools and their autoscaler, the Ingress controller, Workload Identity, the PVCs ([L22] §3.1, §3.5, §3.7, §3.8) |
+| Fargate | control plane, task hosts | none. Slide 59 pairs ECS + Fargate with Cloud Run, "different contract"; *ours*: GKE Autopilot would be the closer match | — |
+| Cloud Run | routing, instances | Cloud Run service, path B of [L14] | the image, public access, the runtime service account, min and max instances, concurrency ([L14] §3.1–3.7) |
+| Lambda | event routing, runtime | Cloud Run function, path A of [L14] | the source, the entry-point name, the dependency list ([L14] §3.4) |
+| not on the slide | — | Vertex AI custom jobs ([L13] §3.4), endpoints ([L15] §3.2), Pipelines ([L15] §3.7), Gemini as an API ([L10] §3.8) | the job spec or pipeline code, the service accounts ([L13] §3.5, [L15] §3.8), undeploying and deleting endpoints ([L15] §3.2) |
+
+### Slide 71's complete picture, box by box
+
+| Box (slide 71) | Course counterpart |
+|---|---|
+| Browser | The same: it downloads the page and then calls the API itself ([L18] §3.5, [L22] §3.4 step 6) |
+| CDN for static files | None. The frontend container serves the pages ([L20] §1, [L22] §1) |
+| Identity provider and token | None for users. Software identities instead: service-account keys ([L10] §3.1–3.3) and Workload Identity ([L22] §3.7) |
+| ALB, the HTTPS entry in the public subnet | nginx on the VM ([L20] §3.8), the NGINX Ingress controller behind a network load balancer ([L22] §3.4), a Google HTTPS load balancer ([L23] §3.8) |
+| FastAPI tasks in the private app subnet | The `api-service` container on the VM ([L20] §1); the `api` Deployment on private nodes ([L22] §3.1–3.2) |
+| PostgreSQL + pgvector in the private data subnet | ChromaDB as a container or Pod on a persistent disk ([L20] §1, [L22] §3.5) |
+| Not drawn: the registry the tasks pull from (17) | Docker Hub ([L02] §4 Part B), Artifact Registry ([L14] §3.6, [L20] §3.5) |
+| Not drawn: the NAT for outbound calls (14) | Cloud NAT ([L22] §5 Excerpt 1) |
+| Not drawn: secret delivery (22) | `secrets/` mounts ([L10] §3.4), repository secrets ([L21] §3.8), Workload Identity ([L22] §3.7) |
+| "One Availability Zone is shown" | A regional control plane with a one-zone node pool ([L22] §3.1) |
+
+### What the title promises: the cost figures in the guides
+
+The slides name cost only as "low cost" for a prototype (77). The guides give approximate list prices for each kind of contract the lecture compares. These are the guides' figures, not the slides'.
+
+| Contract | Tutorial | What it costs, per the guide |
+|---|---|---|
+| Pay per call, nothing running | [L05], [L10] At a glance | only Vertex AI calls; under $2 for the whole L05 tutorial |
+| Function or service that scales to zero | [L14] At a glance, §3.3 | a tiny fraction of Cloud Run's free tier with request-based billing and min instances 0. Min instances ≥ 1 or instance-based billing charge around the clock, and concurrency 1 instead of 80 needs about 20× the instances (§8 E6) |
+| Run-to-completion job | [L13] At a glance | about $0.22/h for `n1-standard-4`, only while the job runs |
+| Managed model endpoint | [L15] At a glance, [L23] At a glance | billed per node-hour, 24/7, even with no traffic; L23 estimates about $0.2/h per endpoint |
+| One VM | [L20] At a glance | about $2/day for `n2d-standard-2`, plus about $4/month for two 50 GB disks |
+| Managed Kubernetes | [L22] At a glance | about $5–8/day: the regional cluster fee, 1–2 nodes, the load balancer, Cloud NAT, disks |
+
+### Questions to answer after the lecture
+
+1. What two things does deploying add to an app that already runs on your laptop? Give the endpoint before and after. (3)
+2. A VM has a public IP, but a request to its port 9000 times out. Name three things that can still block it. (4, 8, 11, 13) Compare with L20 §1, where 9000 is published on the host and still unreachable.
+3. How many addresses do `10.0.0.0/12`, `10.0.2.0/24` and L22's `10.0.0.0/19` hold? Show the varying-bits method. (5–7)
+4. FastAPI listens on `:8000` and calls ChromaDB. Who picks the source port of that call, and how does the reply get back in? Why pick an explicit application port, and where can it collide with the OS? (9–10)
+5. A new security group has no rules. What can reach the instance, and what can it reach? Which route-table row makes a subnet public, and what does a NAT gateway refuse? (11, 13–14) Compare with L20's firewall rules and L22's Cloud NAT.
+6. Draw the three-subnet VPC. In which tier do FastAPI, the frontend server, ChromaDB and the NAT gateway go? (15–16)
+7. Why does a deployment pull a tagged image instead of rebuilding it, and what goes wrong with a reused tag such as `:latest`? (17, 29) Compare with L20 §3.5 and L23 §3.4.
+8. In `docker run -p 8080:8000 myapp:v1.4`, which number does the browser use and which does FastAPI bind? Why must FastAPI listen on `0.0.0.0`? How do an operator and a user each reach the workload on EC2? (18–20)
+9. Which values belong in the image and which are injected at startup? Where may a secret never go, and how does it reach the workload? (21–22) Compare with L22 §3.7.
+10. What does an Nginx or ALB front door in the public subnet protect? What can an on-path attacker do to plain HTTP, what does HTTPS change, and why does the bypass attempt fail? (23–26)
+11. List the DNS and connection steps from typing `api.example.com` to reaching FastAPI, and name the protocol on each hop of one `/predict` request. Which hop is not SQL in the cheese app? (27–28)
+12. Who calls `POST /predict`, the frontend host or the browser? Sketch both runtime layouts and say which one L20 and L22 use. (30–32)
+13. What do EC2 and Fargate provide, and what do ECS and Kubernetes provide? What is a task or a pod? (34, 41–42)
+14. Compare one VM per service with all services on one VM. Who patches what on EC2? (35–37) Compare with L20 §8 E7.
+15. What does AWS take over on Fargate, and what stays with the team? (38–40)
+16. An ECS service has desired count 3 and one task fails. What happens? Then the desired count goes from 3 to 6 and no capacity is free. What happens now? (43–45)
+17. When would you choose EKS over ECS, and what does EKS still leave to you? (47–49)
+18. What does Cloud Run run for you that ECS + Fargate leaves to you? Follow the scaling chain from signal to capacity: what can still limit throughput? (50–52)
+19. Which work fits a function and which does not? What happens to two overlapping requests on Lambda and on Cloud Run functions? (53–56)
+20. For EC2, ECS/EKS + EC2, Fargate, Cloud Run and Lambda, name the layer the provider operates. What never moves to the provider, and why are cross-cloud pairs only approximate? (57–59)
+21. Why can static frontend files stay outside the VPC, and which requests enter at the ALB? (61–64)
+22. Compare ChromaDB on EC2, PostgreSQL + pgvector as a service, and a vector search service on operations, data model and recovery. What does managed PostgreSQL still leave to you, and is high availability on by default? (65–68) Compare with L20 §6 item 23.
+23. A token's signature, issuer, audience and expiry all check out. Why may the request still be refused? (69–70) Compare with L10 §3.3.
+24. Walk slide 71's picture from the browser to the data. What would change in production? (71)
+25. Name the three ways to deploy one Next.js codebase and the question that picks between them. (72–73)
+26. Fill in slide 79's worksheet for the cheese app as L22 and L23 deploy it. Which choices would you change for a prototype, and which for production? (75–80)
+
+### Study guides and video folders
+
+The guides are in this repository's `guides/`. The video folders are in the Explainer_Videos repository under `videos/`, and each one already holds the episode's `digest.md` and `SLIDES.md`. The course map in `README.md` shows which videos are out; when this was written, only L01's was.
+
+| Lecture | Study guide | Video folder |
+|---|---|---|
+| L01 | [L01] `L01-vms-venvs.md` | `ac215-l01-vms-venvs` |
+| L02 | [L02] `L02-containers-1.md` | `ac215-l02-containers-1` |
+| L03 | [L03] `L03-containers-2-mega-pipeline.md` | `ac215-l03-mega-pipeline` |
+| L04 | [L04] `L04-containers-2b-flexible-workflow-ports.md` | `ac215-l04-flexible-workflow-ports` |
+| L05 | [L05] `L05-rag.md` | `ac215-l05-rag` |
+| L10 | [L10] `L10-cloud-connect-cheese-app-v0.md` | `ac215-l10-cloud-connect` |
+| L13 | [L13] `L13-training-workflows.md` | `ac215-l13-training-workflows` |
+| L14 | [L14] `L14-serverless-deployment.md` | `ac215-l14-serverless-deployment` |
+| L15 | [L15] `L15-vertex-ml-workflows.md` | `ac215-l15-vertex-ml-workflows` |
+| L18 | [L18] `L18-apis-frontend.md` | `ac215-l18-apis-frontend` |
+| L20 | [L20] `L20-deployment-pulumi.md` | `ac215-l20-deployment-pulumi` |
+| L21 | [L21] `L21-cicd-github-actions.md` | `ac215-l21-cicd-github-actions` |
+| L22 | [L22] `L22-kubernetes-cloud.md` | `ac215-l22-kubernetes-cloud` |
+| L23 | [L23] `L23-final-cicd-deployment.md` | `ac215-l23-final-cicd` |
+
+The guides for L06–L09 and L11 (agents, fine-tuning, testing, data labeling) touch none of this lecture's ideas and are not cited above.
+
+[L01]: ../guides/L01-vms-venvs.md
+[L02]: ../guides/L02-containers-1.md
+[L03]: ../guides/L03-containers-2-mega-pipeline.md
+[L04]: ../guides/L04-containers-2b-flexible-workflow-ports.md
+[L05]: ../guides/L05-rag.md
+[L10]: ../guides/L10-cloud-connect-cheese-app-v0.md
+[L13]: ../guides/L13-training-workflows.md
+[L14]: ../guides/L14-serverless-deployment.md
+[L15]: ../guides/L15-vertex-ml-workflows.md
+[L18]: ../guides/L18-apis-frontend.md
+[L20]: ../guides/L20-deployment-pulumi.md
+[L21]: ../guides/L21-cicd-github-actions.md
+[L22]: ../guides/L22-kubernetes-cloud.md
+[L23]: ../guides/L23-final-cicd-deployment.md

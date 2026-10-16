@@ -13,6 +13,7 @@
 - **最费时间的坑：** ① ADK repo 没有 lockfile（`uv.lock` 被 gitignore），今天 `uv sync` 装的是 google-adk 2.11.0，一选 `1-baseline` 就报 `Invalid agent name`；先 `uv add "google-adk>=1.8.0,<1.28"`（→ 1.27.5）再 `uv sync`。② 除了 `6-rag/1-vertex-rag-engine`（写死 `gemini-2.5-flash`），每个 `agent.py` 的 fallback `gemini-2.0-flash` 都已经在 2026-06-01 shut down：root `.env` 里写 `GEMINI_MODEL=gemini-3.1-flash-lite`，也别随手 copy module 的 `.env.example`，ADK 用 `override=True` 加载离 agent 最近的 `.env`。③ port 8000 冲突：`adk web` 和 llm-rag 的 ChromaDB 都要 8000，`exit` container 之后 `llm-rag-chromadb` 还在跑，要 `docker compose down`，或者 `uv run adk web --port 8080`。
 - **别拿 `out.txt` 对答案：** `out.txt` 里的答案（Soča Valley、transhumance）是用 2026-09-22 改写 Tolminc 书之前的旧 index 跑的，README 流程图里的答案（"Slovenian Alps"）也来自旧书，今天你会得到 Mara 和她爷爷的故事。agent 查的是 L05 的 `char-split-collection`，没有的话先跑 `python cli.py --chunk --embed --load --chunk_type char-split`。
 - **做完要删：** llm-rag `exit` 之后在 `llm-rag/` 里 `docker compose down`；`adk web` / `uvicorn` 用 Ctrl+C；6-rag 的 ChromaDB `docker compose down`（加 `-v` 连 volume 一起删）；做了 `6-rag/1-vertex-rag-engine` 的话，用 `setup_corpus.py` 的 option 5 删掉 RAG Engine corpus；三个 Colab 都 *Runtime → Disconnect and delete runtime*；不用的 service-account key 删掉，`secrets/` 和 `**/.env` 永远不要 commit。
+- **Lecture slides：** 老师的 Lecture 6 slides（56 页）和这份 guide 各节怎么对应、做 tutorial 需要的 10 个 lecture ideas，以及 slides 和今天的 repo/notebook 不一样的 7 处，都在下面的 [Lecture slides](#lecture-slides)。最要紧的两处：① slide 26 说 agent 会自己一直跑到任务完成，但 `llm-rag --agent` 只有一次强制的 tool call 加一次回答，没有 loop，loop 要到 ADK 和 notebook 里才有；② slides 10、13、33 里 agent 可以决定**不** retrieve，而 `mode="any"`（`cli.py:449`）逼 Gemini 每次都 call tool：它只能选搜哪本书，不能选搜不搜（Exercise 2 把这个选择还给它）。
 
 ## At a glance
 
@@ -61,6 +62,48 @@
 - **Path convention:** `cli.py`, `agent_tools.py`, `out.txt`, `docker-*.sh` and `docker-compose.yml` without a prefix are in `llm-rag/`; module paths such as `1-baseline/agent.py` are in `llm-agent-google-adk/`. A bare `README.md` is the README of the repo the surrounding part is about (llm-rag in Part B, the ADK repo in Part C). Third-party paths start with the package name and version, notebook references with the notebook name and cell number.
 
 </details>
+
+## Lecture slides
+
+The instructor's deck for this lecture is *Lecture 6: LLM: Agents I*, 56 slides. Slide numbers are PDF page numbers. The slides are not reproduced here; what follows is in our own words. The deck has no code: it teaches with box diagrams and annotated screenshots of a chat assistant. The full slide digest and the cross-check with the video live in the Explainer_Videos repo, in `videos/ac215-l06-agents-1/SLIDES.md`.
+
+**Map**
+
+| This guide | Slides |
+|---|---|
+| At a glance; §1 What you build | 20–22 (why agents), 13–14 (agentic RAG), 26–27 (definition, anatomy) |
+| §3.1 LLM vs workflow vs agent; §4 Part A4 | 4–5 (plain LLM), 16–18 (the multi-call "Reasoning LLM"), 26–27 |
+| §3.2 Function calling; §4 Part B; checklist *llm-rag · Agents* | 13–14, 39, 51 |
+| §3.3 The agent loop | 26, 37–41 (the decision maker's cycle; dynamic control) |
+| §3.4 Context engineering; §4 Part A5 | 36, 40–41 (the full topic is in Lecture 7, slides 11–18) |
+| §3.5 Tools, schemas and MCP; §4 Parts A6–A7, C5 | 51–53 |
+| §3.6 ADK's runtime objects; §4 Parts C1–C3 | 35–36, 40–41 (the blocks you configure) |
+| §3.7 Multi-agent patterns; §4 Parts A8, C7 | 38 (planner), 44–49 (a research agent with sub-agents), 51 (orchestration tools) |
+| §3.8 The harness; §4 Parts D–E | 20–22 (the travel planner), 36–37 (success criteria, guardrails) |
+| §8 Exercise 2 (let the model skip the tool) | 10, 13, 33 (deciding whether to retrieve) |
+| §2 costs and teardown, §5 code tour, §6 gotchas, the other exercises, §9 errata | none (tutorial-only) |
+| — (background) | 6–12 (L05's RAG variants recapped), 28–33 and 42–49 (the chat-assistant demos) |
+
+**Lecture ideas you need for this tutorial**
+1. A plain LLM or RAG cannot act: it has no contact with live systems, no tools that change anything, and no autonomy to adapt. Agents add these (slides 20–22).
+2. Agentic RAG puts an LLM in front of retrieval to choose how to retrieve. `llm-rag --agent` is exactly this, with a menu of two search tools (slides 13–14).
+3. An agent is an LLM with instructions and tools that keeps running on its own until the task is done (slide 26).
+4. An agent has five parts: LLM core, instructions, dynamic control, tools, memory. You configure four of them; dynamic control emerges from the model plus the prompt, and in code it is the framework's loop (slides 27, 37, 41).
+5. Choosing the LLM core is a design decision: the model, its sampling parameters (`temperature`, top-p, max tokens) and the response format. Here that is `GEMINI_MODEL`, `temperature=0` and the JSON schema (slide 35).
+6. Instructions give the core a role, constraints, goals with success criteria, and an output format (slide 36).
+7. The decision maker cycles through a planner, tools and memory. That cycle is the agent loop that ADK and the Agents SDK run for you (slides 37–40).
+8. Tools are functions with schemas. The agent must pick the right one, format its inputs and interpret its outputs. There are three families: data tools (search), action tools (change something) and orchestration tools (hand work to another agent) (slides 39, 51).
+9. MCP replaces one custom integration per tool with one standard protocol: the agent is a host with clients, and each external system sits behind a server (slides 52–53).
+10. An agent can direct sub-agents: a lead agent makes a plan and sends several search agents out in parallel, then writes one report (slides 44–49).
+
+**Where the slides and today's tutorial differ** (in each case, the repos at `e17a39f` / `f89faa7` and the notebooks decide)
+- Slide 26's agent runs until the task is done. `llm-rag --agent` makes one forced tool call and one answer, with no loop (§3.3). The loop arrives with ADK and the notebooks.
+- On slides 10, 13 and 33 an agent may decide not to retrieve. `mode="any"` (`cli.py:449`) forces a tool call every time, so the llm-rag agent picks which search, never whether (Exercise 2).
+- Slide 40's memory lasts across sessions. The ADK README uses "Memory" for per-session state (E12), and the Travel Planner's `SQLiteSession` ends with the runtime.
+- Slide 53 draws one "MCP" box in front of every server. In code each server is its own connection: an HTTP URL, a thread on port 8001, an `npx` child process over stdio (§3.5).
+- Slides 20–22's planner books a Paris trip through live systems and replans for weather or delays. The notebook uses a three-city mock catalog with no weather tool and books nothing; ADK's `1-baseline` has no tools at all, so its prices are the model's guesses.
+- "Reasoning" means three things on the slides: a multi-call system (16–18), the model's own thinking (31–33) and the LLM core (27). The Cheese Quiz's `ReasoningLLM` is the first kind, with Python ordering the calls (§3.1).
+- Slides 36–37 put success criteria and guardrails in the instructions. The harness notebooks check them in code (the approval gate, the receipt), and a rule left only in the prompt slipped through (E15; §3.8).
 
 ## Command checklist
 

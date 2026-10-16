@@ -14,6 +14,7 @@
 - **最费时间的坑：** ① `export OPENAI_API_KEY=...` 必须在 `bash docker-shell.sh` **之前**；container 已经在跑的话，`docker exec` 不会刷新 env，要在 container 里 `read -rsp "OpenAI API key: " OPENAI_API_KEY` 再 `export OPENAI_API_KEY`。app 不读 `.env`。② 第一次 `docker build` 很慢：`agent-framework==1.19.0` 拉进 ~30 个 integration、约 235 MB 的 wheel（光 `claude-agent-sdk` 就 103.5 MB，这节课根本没用到）。③ 必须在 `agent-harness/` 目录里跑（mount 用的 `$(pwd)` 和 build 用的 `-f Dockerfile .` 都取决于当前目录）。④ live 的 `manager-approval` 可能永远不弹 approval，因为 model 可能选了一个 ≤ $200 的合法 cart；要稳定地看到 review 就用 `--fixture`（$220.80）。
 - **花多少钱：** 唯一计费的是 OpenAI tokens。一次 live Act 1 run ≈ 20,862 input + 895 output tokens；README 里所有 live command 加起来大约 30–40 个 agent run（粗估 0.5–1 M input tokens）。`--fixture`、`--preview-context` 和 `python -m tests` 完全不联网、不花钱。
 - **做完要删：** 在第一个 shell 里 `exit`（`--rm` 会自动删 container；另开的 `docker exec` shell 退出不会停 container，要 `docker stop agent-harness`）；`docker image rm agent-harness` 回收 image；`outputs/` 里的 SQLite traces 含 prompts 和 outputs（API key 已 redact），不需要就 `rm -rf outputs/`。`../secrets` 只是一个空的 placeholder，不用建 service account。
+- **Lecture slides：** 老师的 Lecture 7A slides（49 页；七个 section 和 README 的七节一一对应）和这份 guide 各节怎么对应、做 tutorial 需要的 10 个 lecture ideas，以及 slides 和 tutorial 不一样的 8 处，都在下面的 [Lecture slides](#lecture-slides)。最要紧的两处：① slides 37/39 的 "layers" 指 agent stack 的五层（LLM、Tool、Context、Harness、Skills），tutorial 的 layer 是 `Trace()`、`Budget(...)` 这种可以 `.without()` 拆掉的 harness feature；② slide 27 的 skill 带 agent 会执行的 `scripts/`，这个 harness 故意去掉了 `run_skill_script`：skill 只给 guidance，不执行 code。
 
 ## At a glance
 
@@ -69,6 +70,50 @@
 - **How claims were checked:** every repo `path:line` in this guide was checked with `sed -n` / `grep -n` on 2026-10-13. Docker, the CLI, the tests and the notebooks were **not** run. Any expected output that is not a quote from the saved Colab outputs is marked *(reasoned from code, not run)*.
 
 </details>
+
+## Lecture slides
+
+The instructor's deck for this lecture is *Lecture 7A: LLM: Agents II*, 49 slides. Slide numbers are PDF page numbers. The slides are not reproduced here; what follows is in our own words. The full slide digest and the cross-check with the video live in the Explainer_Videos repo, in `videos/ac215-l07-agent-harness/SLIDES.md`. The deck's seven sections are the README's seven numbered sections, in the same order, and the README's opening table maps each "Lecture concept" to an act (README.md:11-21).
+
+**Map**
+
+| This guide | Slides |
+|---|---|
+| §7 Where this sits in the course (what L06 gave you) | 5–8, 34 (recap of Agents I) |
+| §1 What you build; checklist *1. Recap*; §3.1; §5 Excerpts 1, 4 | 6–10 (the agent, an LLM call vs the agent loop), 20 (the runtime, not the model, executes tools) |
+| §3.2; the checklist's harness notebook cell; §5 Excerpts 2–3 | 20–24 (harness, one turn, action boundary, harness engineering) |
+| Checklist *2. Context Engineering*; §3.3; §5 Excerpt 5 | 12–18, 22 ("instruction vs evidence lanes") |
+| Checklist *3. Agent Harness*, Act 3; §3.4; §5 Excerpts 6–8 | 22–23 (move decisions into code; authority), 36 (autonomy spectrum) |
+| Checklist *3. Agent Harness*, Act 4; §3.5; §5 Excerpts 9–10 | 8, 13–16 (long- and short-term memory), 22 (row "Context & memory") |
+| Checklist *4. Skills*; §3.6; §5 Excerpt 11 | 26–29 |
+| Checklist *5. Agent Systems*; §3.7; §5 Excerpt 12 | 31–36, 22 (row "Sub agents") |
+| Checklist *6. Evaluation*; §3.8 | 39–42 |
+| Checklist *7. Additional Resources* | 44 (the tutorial's Colab and GitHub links); 45–48 are the deck's own "Additional Resources" (cloud GenAI stacks), not the README's |
+| Setup, §2, §6, §8, §9 | none (tutorial-only); §4 follows the same acts as the checklist |
+
+Lecture-only: 35 (a traditional software component mapped onto an agent) and 37 (the five-layer agent stack and who owns each layer).
+
+**Lecture ideas you need for this tutorial**
+1. An agent is an LLM, given instructions and tools, that runs on its own until the task is done. The model only proposes an action; the runtime executes it (slides 6, 20).
+2. An agent's input adds tool definitions, and tool outputs and memory flow back in, so the input grows every turn. That is why what goes into the model must be managed (slides 9–10).
+3. Context is everything in one call. Context engineering decides what goes in, when, and how it is kept across turns; every block your code adds is a decision (slides 12–18).
+4. A harness is the loop, tools, context management and guardrails around the model. In one turn the model thinks, reasons and plans; the harness executes, verifies, and decides what you see (slides 20–21).
+5. The action boundary: for control flow, tools, context and memory, verification and sub-agents, the model makes the open choices and the harness owns the limits, schemas, compaction and deterministic gates. Move a decision into code when stakes are high, the action is irreversible, the task is predictable, or an audit is required (slide 22).
+6. The line moves both ways as models and tasks change, but the harness keeps authority at every point, framed by permissions, sandboxing, budgets and checks (slide 23).
+7. A skill is a folder with a `SKILL.md`. The agent first sees only names and descriptions (about 100 tokens each), loads a body when a task matches (under about 5k tokens), and reads resources as needed. The description is a hint, not a trigger (slides 26–28).
+8. A tool grants an action, MCP grants connectivity, and a skill grants know-how (slide 29).
+9. Autonomy is a spectrum, from fixed graphs to agents choosing their own path. In the manager pattern, one agent calls others as tools (slides 33, 36).
+10. Measure outcome, trajectory and cost; prefer deterministic checks; change one layer, run the suite k times, compare with a baseline and keep the traces. The eval set is the most valuable artifact (slides 40–42).
+
+**Where the slides and the tutorial differ** (in each case, the repo at `e25dfe9` shows what the code does)
+- "Layers" on slides 37 and 39 are the five parts of an agent stack (LLM, tool, context, harness, skills). In this tutorial a layer is a removable harness feature such as `Trace()` or `Budget(...)` (§3.2), and context and skills are layers *inside* the harness.
+- Slide 27's skill has a `scripts/` folder that the agent runs. The tutorial's skills have only `references/` and `assets/`, and the harness strips the SDK's `run_skill_script` tool (§3.6).
+- Slide 33's manager agent calls other agents as tools. Act 6's outer assistant calls a governed workflow, `start_order(request_id)`, whose one model node is the cart proposer; there is no peer handoff (§3.7).
+- The slides place fixed workflow graphs under Agent Systems (slide 36); the README files the Act 3 workflow under "3. Agent Harness". Same graph, two filings.
+- Slides 21 and 41 list LLM judges. The tutorial uses none (`context_evidence.py`: "no model judge"): deterministic property checks over traces, plus the five-point human review in README §6 (§3.8).
+- Slide 22 lets the model decide what is worth remembering. In Act 4 the model has no memory-write tool; only the host writes memory, with `--remember-preference` (§3.5; README.md:488).
+- Slide 21's Think and Reason steps are not in the traces: the README says its logs show "visible execution, not hidden model reasoning" (README.md:198). You see which tools the model asked for, not why.
+- Slides 13–16 call retrieved data "RAG". In Act 2 it is a Python pre-filter over the catalog plus saved preferences, with no embeddings or vector store (§3.3).
 
 ## Command checklist
 

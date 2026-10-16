@@ -60,7 +60,7 @@ The instructor's deck for this lecture is *Lecture 14: Serverless Deployment: Cl
 
 | This guide | Slides |
 |---|---|
-| At a glance; §7 Where this sits in the course | 5 (Cheese App roadmap), 6 (the four components; "Model Deploy" is next), 9 (serverless across L13–L15) |
+| §7 Where this sits in the course | 5 (Cheese App roadmap), 6 (the four components; "Model Deploy" is next), 9 (serverless across L13–L15) |
 | §1 What you build | 10 (one app, four deployment options) |
 | §3.1 Serverless, scale to zero; §3.3 billing | 8, 11, 14 |
 | §3.2 Cold starts | 16 |

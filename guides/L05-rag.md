@@ -13,6 +13,7 @@
 - **最费时间的两个坑：** ① folder 的名字和位置：clone 出来的 folder 必须叫 `llm-rag`（`docker-compose.yml:12` 写死了 `../llm-rag`），否则 container 一启动就报 `/bin/bash: docker-entrypoint.sh: No such file or directory`；`secrets/` 必须是它的 sibling（`docker-compose.yml:11` 写死了 `../secrets`），key 放错位置要到第一次 `--embed` 才报 `DefaultCredentialsError`，因为 char-split / recursive-split 的 `--chunk` 不调 API。② 403：忘了改 `docker-shell.sh:7` 的 `GCP_PROJECT`（默认是 `ac215-project`），或者没 enable Vertex AI API（README 根本没写这一步），`--embed` 就会报 `PERMISSION_DENIED` / `SERVICE_DISABLED`。（另外：Compose 只在 image 不存在时才 build，`git pull` 改了 dependencies 之后要自己 `docker compose build`。）
 - **README 的 errata：** `SYSTEM_INSTRUCTION` 定义了但从来没传给 model（E1），所以 answer 的 grounding 比 README 说的弱；`out.txt` 是用旧版 Tolminc 书跑的 `--agent`（L06），别指望复现；`chromadb/chroma:latest` 没 pin（2026-10-12 是 1.5.9，client 是 1.1.0）；Storage Admin 这个 role 用不到。
 - **做完要删：** `exit` 只删掉 CLI container，`llm-rag-chromadb` 还在跑、还占着 port 8000，要在 `llm-rag/` 里 `docker compose down`。Cloud 上没有要删的东西（只有 pay-per-call 的 Vertex AI，整个 tutorial 做两遍也远低于 $2）。可选：删 `outputs/` 和 `docker-volumes/`（Linux 上要 `sudo`）；课程结束后在 IAM 里删掉 JSON key。
+- **Lecture slides：** 老师的两份 Lecture 5 slides（deck A "Introduction to RAG" 64 页，deck B "Advanced RAG" 89 页）和这份 guide 各节怎么对应、做 tutorial 需要的 10 个 lecture ideas，以及 slides 和今天的 code/captures 不一样的 9 处，都在下面的 [Lecture slides](#lecture-slides)。最要紧的三处：① slides 按 similarity 排序（越大越近），Chroma 返回的是 cosine distance（= 1 − similarity，越小越近）；② slides 把 metadata filtering 放在 ranking 之后，Chroma 的 `where` / `where_document` 是先过滤再排序，所以 `--query` 的 10 个结果里没有 Tolminc；③ slides 的 semantic chunking 用固定的 0.8 threshold，`semantic_splitter.py` 则是在所有 distance 的 95th percentile 处切。
 
 ## At a glance
 
@@ -65,6 +66,59 @@
 - **Colab notebooks:** none. The `colab/` folder has nothing for L05; the L06 notebooks are only cited in §7.
 
 </details>
+
+## Lecture slides
+
+The instructor's slides for this lecture come in two decks:
+- *Lecture 5: Introduction to RAG* (deck A, `L05_RAGs_I_fix`, 64 slides). It walks the naïve-RAG pipeline that this tutorial builds, one box at a time.
+- *Lecture 5 suppl: Advanced RAG* (deck B, `Lec05b_RAG_II_added_j_suffix_in_RRF`, 89 slides). Its semantic-chunking walk-through matches §3.7. Query rewriting, hybrid search, re-ranking and Self-RAG have no code in this tutorial.
+
+Slide numbers are PDF page numbers, written A12 or B46; the printed footers differ. Neither deck shows commands, Docker, ChromaDB or Gemini.
+
+The slides are not reproduced here; what follows is in our own words. The full slide digest and the cross-check with the video are in the Explainer_Videos repo, in `videos/ac215-l05-rag/SLIDES.md`. This answers the slides part of §9 Q1.
+
+**Map**
+
+| This guide | Slides |
+|---|---|
+| At a glance; §1 What you build | A6–A16 (why RAG, the three options, what RAG is, the naïve-RAG pipeline); B5–B6 (its three phases) |
+| §2 Prerequisites and costs | none. B61 explains the cost shape: the heavy embedding work happens once, up front, and each question costs one embedding. |
+| §3.1 RAG = retrieval + generation | A6–A14, A61–A62; B68–B72 (what RAG doesn't guarantee; looking things up only when needed) |
+| §3.2 Chunking; §4 Steps 4–5 | A19–A22, B13–B19 |
+| §3.3 Embeddings and cosine similarity; §4 Step 6 | A24–A28, A40–A47; B59–B60 (one encoder for documents and queries) |
+| §3.4 The vector database; §4 Step 7 | A30–A38 |
+| §3.5 Retrieval: top-k and filters; §4 Steps 9, 11 | A39, A44, A48–A55 |
+| §3.6 Augmented generation; §4 Step 10; §9 E1 | A57–A62; B78 (checking that the answer is supported) |
+| §3.7 Semantic chunking; §4 Step 12 | B19–B34 |
+| Command checklist; §3.8 The ops shape; §4 Steps 0–3, 8, 14; §5 Code tour; §6 Gotchas | none (tutorial-only) |
+| §4 Step 13 (Agents preview); §7 Where this sits | A9 (fine-tuning comes later: L08); B35–B65 (query rewriting, hybrid search, re-ranking); B66–B88 (Self-RAG) |
+| §8 Exercises | Ex 4 ↔ A58–A59; Ex 5 ↔ A44–A47; Ex 6 ↔ B60 |
+
+**Lecture ideas you need for this tutorial**
+1. **Why RAG.** LLMs have stale training data, lack domain knowledge, hallucinate and don't cite sources; RAG targets the first two. Pasting every document into the prompt gives garbage, and fine-tuning takes too long (A6–A10).
+2. **Naïve RAG is two lanes.** Knowledge base → chunking → embedding model → vector database. Question → the same embedding model → the database → prompt → LLM. The three phases are Indexing, Retrieval, and Augmentation & Generation (A16, B5).
+3. **One encoder, two moments.** The same embedding model embeds the documents ahead of time and the question when it arrives. That makes retrieval fast, and it's why the query and the chunks must use the same model and size (B59–B61).
+4. **Chunk so retrieval can focus.** Fixed-size character splitting is the default; it cuts words in half and runs sections together. Chunks that follow the document's structure are better (A20–A21, B14–B19).
+5. **Embeddings and similarity measures.** A whole chunk becomes one vector (a sentence embedding, not word embeddings). Cosine similarity compares directions; Euclidean distance and the dot product also count length. Cosine suits text embeddings (A25–A28, A42–A47).
+6. **Why a vector database, and why an index.** SQL can't search by meaning, and comparing the query with millions of vectors one by one is too slow. An index (LSH, PQ or HNSW; Chroma builds HNSW) jumps to likely neighbours. The database returns the top K, with K fixed in advance (A31–A39, A48–A53).
+7. **Optional post-processing.** Metadata filtering and re-ranking are optional. Metadata is data about the data, such as author, publication date and category (A54–A55).
+8. **The final prompt** is a system prompt (how to behave), plus the user's query, plus the retrieved context (A57–A59).
+9. **Semantic chunking.** Split the text into sentences, take each one with a window of neighbours, compare them by the cosine similarity of their embeddings, and join the similar ones (B19–B33).
+10. **Limits and next steps** (no code here). Even advanced RAG doesn't guarantee relevant chunks or a supported answer, and it retrieves even when it needn't (B68). The lecture's levers: query rewriting, hybrid search (BM25 plus vectors, merged with Reciprocal Rank Fusion), re-ranking with a cross-encoder, and Self-RAG (B35–B88).
+
+**Where the slides and today's tutorial differ** (the code and the 2026-10-16 captures decide)
+- **Scores vs distances.** The slides rank by similarity: higher is closer (A48–A53). Chroma returns cosine distance, 1 − similarity: lower is closer, and a chunk's own vector comes back at 0.0000 (§3.3).
+- **When filters apply.** The slides put metadata filtering after ranking (A54–A55). Chroma applies `where` and `where_document` first and picks the top 10 among the survivors. That's why `--query` returns Italian cheeses and no Tolminc (§3.5).
+- **The system prompt.** The slides' final prompt starts with a system prompt (A58–A59). `cli.py` defines a cheese-expert `SYSTEM_INSTRUCTION` but never sends it (§9 E1).
+- **The semantic-chunking rule.**
+  - The slides move an anchor sentence along and join neighbours whose similarity clears a fixed 0.8 (B21–B33).
+  - The code compares every pair of neighbouring three-sentence windows and cuts where the distance is above the 95th percentile.
+  - The code also calls the embedding API already during `--chunk` (§3.7).
+- **Overlap.** The slides' character-split pieces sit end to end, with no overlap (B14–B18). `char-split` repeats 20 characters at each cut. `recursive-split` repeats up to 200, a library default the README doesn't state (§3.2, §9 E14).
+- **"Indexing".** It means the search structure on A32–A38, the whole offline phase on B5–B10, and better chunking on B13–B34. The README just says "Chunk -> Embed -> Load" (§1).
+- **Who embeds the question.** On A12 the question itself goes to the vector database. In the code, Google embeds the question first, and Chroma receives only the vector. Passing text instead would make Chroma use its own, different embedding model (§3.4, §8 Ex 6).
+- **How much RAG guarantees.** The slides claim only fresher and domain-specific knowledge (A7), and warn that answers may still be unsupported (B68). The README promises answers "grounded in your documents" (`README.md:21`). But the code sends no instruction to stay inside them, and it leaves the book names out of the prompt (§3.6).
+- **Keyword search.** The slides' hybrid search ranks by keywords (BM25) and fuses the rankings (B42–B48). The tutorial's `where_document={"$contains": …}` only filters by a word, before the vector ranking (§3.5).
 
 ## Command checklist
 

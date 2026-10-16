@@ -2,6 +2,17 @@
 
 Source: deck `L12_app_design` (58 slides), "Lecture 12: App Design", AC215/E115, Pavlos Protopapas and Shivas Jayaram. These are the instructor's lecture slides (PDF), provided by the student for study. The PDFs are not in this repository, and slide numbers are PDF page numbers. Everything below is a summary in our own words. Quotes are limited to short titles, labels, names and code. L12 has no tutorial repository (`course/lectures.yaml`: `tutorials: []`). Where this digest compares the lecture's naming with "the tutorials", it means the cheese-app repositories of later lectures, as recorded in our study guides (L10, L15, L18, L20, L22, L23).
 
+## 中文速览
+
+- **这一讲讲什么：** L12 没有 tutorial，也没有 video，只有一份 58 页的 slides（"Lecture 12: App Design"）。ML pipeline 做好以后，先 design、再 build：把 model 和 Python functions 变成 APIs，想清楚 user 需要什么，再设计 UI（slide 8）。AI app 除了 code 和 data 还有 models，LLM app 再加上 prompts 和 schemas，所以 design 分三步：Screenflow & Wireframes → Solution Architecture → Technical Architecture（14）。
+- **Idea 1 · Screenflow 先在纸上画：** 先在 whiteboard 或纸上 brainstorm，再画 wireframes：空的 chat → 上传一张 cheese 照片问 "What type of cheese is this?" → 回答 "Brie"。menu 里还有 About Us、Podcasts、Newsletters 三个 static pages（16–18）。L18 的 frontends 就有 chat、newsletters、podcasts 这几页。
+- **Idea 2 · Solution Architecture = Process / Execution / State：** Process 是 people 做什么，Execution 是完成它的 code，State 是整个 life cycle 里要 persist 的东西（20–21）。AI app 的 3×3 grid：Developers / Users / Data Scientists，Frontend / Backend / AI-ML Tasks，Source Control / Database / Data-Models（22–23）。每条 arrow 都标出 interaction 的类型：Human Interactions、CLI + Automation、HTTP/HTTPS、Protocol specific（28–32）。
+- **Idea 3 · backend 分三块：** API server 把 Python functions 暴露给 frontend；AI Engine 放 agents、harness、tools、skills 和 memory（就是 L06–L07 的内容）；Vector DB 负责 retrieval（32–33）。tutorials 里没有单独的 AI Engine container：L18 的 `api-service` 自己 call Gemini 和 Chroma（L10 的 v0 里甚至是 browser 直接 query Chroma）。
+- **Idea 4 · Technical Architecture 是 blueprint：** 从 people 往外画。developers 和 data scientists 用 IDE/CLI 和 browser，所有 development 都在 containers 里；data scientists 还用 Colab；users 只有 browser（36–38）。GCP 里有 GCS bucket、Artifact Registry、Agent Platform（tutorials 里叫 Vertex AI，跑 serverless 的 ML tasks，也提供 Gemini）、single compute instance 或 Kubernetes cluster，以及 persistent volume（39–47）。
+- **Idea 5 · 每条线都有 protocol 和 port：** developer 的线是 HTTPS 443，user 的线 slides 写 "HTTP/HTTPS 80"。cluster 里 NGINX 在最前面，后面是 Cheese App（3000）和 API Service（9000），API → AI Engine（9001）→ Vector DB（8000）（41–47）。注意 slide 47 的 arrowhead 指向发 request 的一方（例如 NGINX），port label 是箭尾那个 container listen 的 port，所以 request 的方向和箭头相反。L20 的 nginx 也这样分流：`/api-service/` → 9000，`/` → 3000。
+- **Idea 6 · 部署和代码组织：** 要活过 image update 的文件放 persistent volume（46, 50）；一台 compute instance 上每个 container 跑一份（L20），要 scale 就上 Kubernetes（L22）（43, 50）。同样 7 种 building blocks 在 GCP、AWS、Azure 都有，只是名字不同（53）。code 按 microservices 拆，一个 component 一个 `src/` folder，tests 放在 container 里，`secrets/` 放在 git root **旁边**，不放进 repo（55–56）。
+- **和 tutorials 不一样的地方：** slides 写 "Agent Platform"，tutorial 的 README 写 Vertex AI；slide 6 写 pipenv，现在的 tutorials 大多用 `uv`；"NFS" persistent volume 在 L20 其实是一块 50 GB 的 block disk；没有 tutorial 用 Streamlit；user 那条线要到 L23（`setupSSL` 的 Google load balancer）才真的是 HTTPS。每个 idea 在哪个 guide 的哪一节用到，见文末的 [Where this shows up in the tutorials](#where-this-shows-up-in-the-tutorials)。
+
 ## Outline
 
 - Slide 1 · Title: "Lecture 12: App Design".
@@ -273,3 +284,119 @@ Compared with the repositories:
   - `cheese-app-v1`/`v2` (L18)
   - `cheese-app-v3` with Pulumi on one VM (L20) and on GKE (L22)
   - `cheese-app-v4` (L23)
+
+## Where this shows up in the tutorials
+
+L12 has no tutorial and no video of its own. Its two architecture diagrams are still a map of the whole course: the containers, keys and buckets of L02–L11 come before it, and the app and its deployment (L15–L23) come after it. The first table takes each key idea above and lists the study-guide sections where a tutorial puts it into practice. "[L20] §3.8" means section 3.8 of that lecture's study guide, and "slide notes" means the guide's *Lecture slides* section. The video folder for each guide is listed at the end. Where a tutorial names or builds something differently, the *Terms* table above has the details.
+
+### Key ideas → tutorials
+
+| # | Key idea (slides) | Where the tutorials apply it |
+|---|---|---|
+| 1 | Design before you build (8) | [L18] §3.1–3.2: the cheese app's model and functions become FastAPI routes. L18 slide notes, idea 4: the screens (newsletters, podcasts, chat) decide the route groups. [L15] §3.2: the trained model becomes an API of its own, a Vertex AI endpoint. |
+| 2 | An AI app has code, data and models; an LLM app adds prompts and schemas (14) | Data: [L11] §3.6 (dataset versions as git tags). Models: [L13] §3.1 (every training run is a record), [L15] §3.2 (Model Registry). Prompts: [L05] §3.6. Schemas: [L06] §3.5 (tool schemas). |
+| 3 | Three design artefacts (14, 15, 19, 34) | Not applied: no tutorial asks for a screenflow or an architecture drawing. The closest are the in-class exercise on slide 57 and the team architecture exercise in L18's APIs deck (APIs 46, which the [L18] slide notes list as not needed for the tutorial). |
+| 4 | Screenflow and wireframes (16–18) | [L18] §3.7 and §4 B6–B9: the simple and React frontends, with chat, newsletter and podcast pages. Its `llm-cnn` chat is slide 17's flow: send a photo, get the cheese back. [L10] At a glance: v0's chatbot frontend. |
+| 5 | Process, Execution and State (20–21) | Each State example on slide 21 has a tutorial: source control [L09] §3.5, [L21] §3.1; artifact registry [L14] §3.6; data store [L03] §3.1, [L11] §3.2; model registry [L15] §3.2; knowledge base [L05] §3.4. So do the Execution examples: notebooks [L13], ML tasks [L15] §3.5, LLM APIs [L10] §3.8, agents and tools [L06] §3.2. |
+| 6 | The role-by-layer grid, filled in (22–23) | Scrape and process images: `ml-workflow`'s data-collector and data-processor, [L15] §1 Part B. EDA and training: [L13] (Colab; MobileNetV2, §3.8). A fine-tuned LLM: [L08] §3.4. Upload and chat: [L18] (the `llm-cnn` and `llm-rag` routers). The same preprocessing at prediction time: [L15] §3.1 puts it inside the model's serving signature. RAG: [L05] §3.1. Stored images, weights, chunks and embeddings: [L11] §3.7, [L13] At a glance (models in a bucket), [L05] §3.4. |
+| 7 | Every arrow names its kind of interaction (24–32) | Human interaction: notebooks in [L13], the browser in [L18] §3.5. CLI + automation: [L15] §3.7 (a CLI container submits the pipeline), [L23] §3.2 (a commit message starts it). Develop → source control: [L09] §3.5, [L21] §3.1. Code → LLM over HTTPS: [L10] §3.2 (a bearer token on every request). Protocol-specific links to state: [L11] §3.7 (gcsfuse), [L05] §3.4 (the CLI reaches the Chroma server by name), [L03] §3.1 (the GCS client). |
+| 8 | Backend = API + AI Engine + Vector DB; frontend = a single-page app (32–33) | API: [L18] §3.1–3.3. What the AI Engine holds: the agent loop [L06] §3.3; harness, memory and skills [L07] §3.2, §3.5, §3.6. Vector DB: [L05] §3.4, [L18] §4 B1. Single-page app: [L18] §3.7 (Next.js). No tutorial runs a separate AI Engine container. In L18 `api-service` calls Gemini and reaches Chroma by container name ([L18] §3.5), its agent route is a stub (L18 slide notes), and in L10's v0 the browser queries Chroma directly ([L10] §3.6). |
+| 9 | The technical architecture is the blueprint (35) | Every deployment guide opens with one: [L18] §1 (APIs 19 draws NGINX and the ports 3000, 9000, 8000), [L20] §1 (L20's slide 7), [L22] §1, [L23] §3.7 (v4's `images/ci-cd.png`). |
+| 10 | Draw from the people outward; all development is containerized (36–38) | Containerized development: [L02]–[L04] (L04 C1–C2: build or pull the image, driven by one wrapper script); [L23] §3.3 (the same toolbox container on a laptop and on a CI runner). Data scientists in notebooks: [L06], [L08] Track B, [L13]. Users have only a browser: [L18] §3.5. |
+| 11 | The GCP blueprint's parts (39–47, 50) | See the box-by-box table below. |
+| 12 | Every link has a protocol and a port (41–47) | Ports in general: [L04] C7, [L10] §3.5, [L18] §3.3 (`0.0.0.0`). NGINX → 3000 and 9000: [L20] §3.8 (`/api-service/` → `api-service:9000`, `/` → `frontend:3000`), and [L22] §3.4, where the Ingress routes the same way. Vector DB on 8000: [L05], [L18] §1. Port 9001: no tutorial. HTTPS for users: only [L23] §3.8 (a Google-managed certificate); L20 and L22 serve plain HTTP on port 80. |
+| 13 | Images flow from laptop to registry to cloud (44–47) | [L02] §3.1 (push to Docker Hub) and §3.7 (an Apple Silicon image will not run on an amd64 VM); [L14] §3.6 (Docker Hub vs Artifact Registry); [L20] §3.5 (timestamp-tagged images in Artifact Registry); [L23] §3.4 (a new tag rolls the Deployments). Exception: L15's pipeline pulls public Docker Hub images ([L15] slide notes). |
+| 14 | Persist what must outlive an image update (46, 50) | [L03] §3.4 (image vs container vs bind mount), [L10] §3.7, [L18] §3.6 (chat history under `/persistent`), [L20] §4 B10 (a data disk at `/mnt/disk-1`), [L22] §3.5 (PVC → PV → disk). |
+| 15 | One machine first, a cluster to scale (43, 50) | [L20] (one VM running five containers), then [L22] §3.1 and §3.6 (node pools, replicas, autoscaling). L22 slide notes, idea 1: why one VM is a single point of failure. |
+| 16 | The building blocks are cloud-agnostic (50–53) | Not applied: every tutorial runs on GCP. L18's APIs deck repeats the comparison (APIs 22, not needed for the tutorial). Some repos have AWS variants (`simple-translate-aws`, `mega-pipeline-aws`, `model-deployment-aws`, `ml-workflow-aws`), but the guides do not cover them ([L02], [L03], [L15] At a glance). |
+| 17 | A diagram is not an app (48–49) | The build is L18 → L20 → L22 → L23, and each of those guides' slide notes lists where the drawing and the code part ways. The sharpest case is [L23] §3.7: the drawn arrow from Model Deploy to the Backend API is not implemented. |
+| 18 | Microservices; tests inside the container; secrets outside git (55–56) | One container per component: [L03] §3.1, [L18] (v2's `src/`), [L23] (v4's `src/`). Tests inside the container: [L09] §3.7, [L21] §3.3 (build once, test the same image). Secrets outside the repo: [L03] §3.8, [L04] C4, [L10] §3.4; in CI as repository secrets, [L21] §3.8. L18's APIs 43 repeats slide 56's tree ([L18] slide notes). |
+| 19 | POC → Prototype → MVP (11–12) | Slide 12's bars, lecture by lecture: data collection [L11], [L15] Part B; experiment tracking and baseline models [L13] (slide notes, idea 1); ML workflow [L15]; build the cheese app [L18]; deployment, scaling and automation [L20]–[L23]. A first API: [L18] v1 (FastAPI, no model yet). One model behind an endpoint: [L15] Part A (Vertex AI rather than FastAPI). No tutorial uses Streamlit. |
+| 20 | Many laptops, one Linux server, a retraining loop (6) | Environments: [L01] §3.3 and §3.7 (venv; uv vs pipenv). Laptop vs server: [L02] §3.6–3.7. The loop: [L23] §3.7 (the app loop and the ML loop run separately). |
+
+18 of the 20 ideas are applied in at least one tutorial. Ideas 3 and 16 are not.
+
+### The slide 47 blueprint, box by box
+
+| Box (slides 39–47) | Where a tutorial builds or uses it |
+|---|---|
+| GitHub (source control, outside GCP) | [L09] §3.5 (hooks before each commit), [L21] §3.1 (Actions on each push), [L23] §3.2 (commit messages trigger deploys) |
+| Colab notebooks (outside GCP) | [L06] (the OpenAI notebooks), [L08] Track B (QLoRA), [L13] §3.1–3.2 (training tracked with W&B) |
+| GCS bucket, "Data & Models" | [L03] §3.1–3.2 (the shared class bucket), [L04] (your own bucket), [L08] (the tuning data), [L11] §3.7 (images, mounted with gcsfuse), [L13] (models and the trainer package), [L15] (`pipeline_root`), [L20] (Pulumi state) |
+| Google Artifact Registry | [L14] §3.6, [L20] §3.5 (`deploy_images`), [L22], [L23] §3.4 |
+| Agent Platform: the four pipeline tasks | [L13] §3.4 (custom training jobs), [L15] §3.5–3.7 (Vertex AI Pipelines: collector, processor, training, deploy) |
+| Gemini (and fine-tuned LLMs) | [L05] (embeddings and answers), [L08] §3.4 (a tuned Gemini endpoint), [L10] §3.8, [L18] (the chat routers) |
+| Single compute instance | [L01] §3.1 (a bare VM), [L20] (the cheese app on one VM) |
+| Kubernetes cluster | [L22] §3.1, [L23] (continuous deployment to it) |
+| NGINX container | [L20] §3.8 (nginx on port 80), [L22] §3.4 (an NGINX Ingress controller), [L23] §3.8 (a Google load balancer in its place) |
+| Cheese App container (3000) | [L18] §3.7 (`frontend-react`), [L20], [L22] |
+| API Service container (9000) | [L09] (the cheese-app-ci-cd service under test), [L10], [L18] §3.1–3.3 |
+| AI Engine container (9001) | No tutorial; what it would hold is [L06]–[L07] |
+| Vector DB container (8000) | [L05] §3.4, [L10], [L18] §4 B1, [L20], [L22] §3.5 (on its own volume) |
+| GCE persistent volume | [L20] §4 B10 (a data disk), [L22] §3.5 (two PVCs, for `/chroma/chroma` and `/persistent`) |
+
+### Questions to answer after the lecture
+
+1. What has to be decided before you build an app on top of an ML pipeline, and in which order? (8)
+2. What does an AI app have that a traditional app does not, and what does an LLM app add? (14)
+3. Which three artefacts make up an app design, and what question does each one answer? (14, 16–17, 20, 35)
+4. Sketch the cheese app's screenflow. Which three screens show one photo-to-answer interaction, and which pages hang off the menu? (17–18)
+5. Name the three layers of a solution architecture. In which layer do these belong: a data scientist training a CNN, the API, the embeddings, the GitHub repository? (21–23)
+6. Why must the app apply the training-time preprocessing to an uploaded image, and what has to be stored so that it can? (23) Compare your answer with L15 §3.1.
+7. For each human activity on slide 31, how does it reach the code (human interaction, CLI + automation, or straight to source control)? How does the code reach the LLMs and the stored state? (27–32)
+8. Which three parts make up the backend, and what lives in the AI Engine? (32–33)
+9. How does a technical architecture differ from a solution architecture, and who is it for? (20, 35)
+10. Follow one chat message on slide 47 from the user's browser to the vector DB. Which containers does it pass, and which port does each listen on? Which way do the slide's arrowheads point? (41, 47)
+11. Which boxes sit outside the GCP boundary, and how does a container image get from a developer's laptop into the cluster? (40, 44–45)
+12. What goes on the persistent volume, and what happens to a file written only inside a container when its image is replaced? (46, 50)
+13. When is a single compute instance enough, and what does a Kubernetes cluster add? (43, 50)
+14. What are the AWS and Azure names for Artifact Registry, Cloud Storage and GKE? (51–53)
+15. How do you decide how small each microservice should be, and where do the tests and the secrets go? (55–56)
+16. Which project phase does app design belong to, and what does each of POC, Prototype and MVP deliver? (11–12)
+17. Why does slide 6's picture (several developers on Mac and Windows, a Linux server, a retraining loop) call for containers and automation? (6)
+
+### Study guides and video folders
+
+The guides are in this repository's `guides/`. The video folders are in the Explainer_Videos repository under `videos/`, and each one already holds the episode's `digest.md` and `SLIDES.md`. The course map in `README.md` shows which videos are out; when this was written, only L01's was.
+
+| Lecture | Study guide | Video folder |
+|---|---|---|
+| L01 | [L01] `L01-vms-venvs.md` | `ac215-l01-vms-venvs` |
+| L02 | [L02] `L02-containers-1.md` | `ac215-l02-containers-1` |
+| L03 | [L03] `L03-containers-2-mega-pipeline.md` | `ac215-l03-mega-pipeline` |
+| L04 | [L04] `L04-containers-2b-flexible-workflow-ports.md` | `ac215-l04-flexible-workflow-ports` |
+| L05 | [L05] `L05-rag.md` | `ac215-l05-rag` |
+| L06 | [L06] `L06-agents-1.md` | `ac215-l06-agents-1` |
+| L07 | [L07] `L07-agents-2-harness.md` | `ac215-l07-agent-harness` |
+| L08 | [L08] `L08-llm-finetuning.md` | `ac215-l08-llm-finetuning` |
+| L09 | [L09] `L09-ci-testing-precommit.md` | `ac215-l09-ci-testing` |
+| L10 | [L10] `L10-cloud-connect-cheese-app-v0.md` | `ac215-l10-cloud-connect` |
+| L11 | [L11] `L11-data-labeling-versioning.md` | `ac215-l11-data-labeling-versioning` |
+| L13 | [L13] `L13-training-workflows.md` | `ac215-l13-training-workflows` |
+| L14 | [L14] `L14-serverless-deployment.md` | `ac215-l14-serverless-deployment` |
+| L15 | [L15] `L15-vertex-ml-workflows.md` | `ac215-l15-vertex-ml-workflows` |
+| L18 | [L18] `L18-apis-frontend.md` | `ac215-l18-apis-frontend` |
+| L20 | [L20] `L20-deployment-pulumi.md` | `ac215-l20-deployment-pulumi` |
+| L21 | [L21] `L21-cicd-github-actions.md` | `ac215-l21-cicd-github-actions` |
+| L22 | [L22] `L22-kubernetes-cloud.md` | `ac215-l22-kubernetes-cloud` |
+| L23 | [L23] `L23-final-cicd-deployment.md` | `ac215-l23-final-cicd` |
+
+[L01]: ../guides/L01-vms-venvs.md
+[L02]: ../guides/L02-containers-1.md
+[L03]: ../guides/L03-containers-2-mega-pipeline.md
+[L04]: ../guides/L04-containers-2b-flexible-workflow-ports.md
+[L05]: ../guides/L05-rag.md
+[L06]: ../guides/L06-agents-1.md
+[L07]: ../guides/L07-agents-2-harness.md
+[L08]: ../guides/L08-llm-finetuning.md
+[L09]: ../guides/L09-ci-testing-precommit.md
+[L10]: ../guides/L10-cloud-connect-cheese-app-v0.md
+[L11]: ../guides/L11-data-labeling-versioning.md
+[L13]: ../guides/L13-training-workflows.md
+[L14]: ../guides/L14-serverless-deployment.md
+[L15]: ../guides/L15-vertex-ml-workflows.md
+[L18]: ../guides/L18-apis-frontend.md
+[L20]: ../guides/L20-deployment-pulumi.md
+[L21]: ../guides/L21-cicd-github-actions.md
+[L22]: ../guides/L22-kubernetes-cloud.md
+[L23]: ../guides/L23-final-cicd-deployment.md

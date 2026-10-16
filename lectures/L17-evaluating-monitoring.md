@@ -2,6 +2,17 @@
 
 Source: deck `L17_evaluating_and_monitoring_ml_systems` (62 slides), "Lecture 17: Evaluating and Monitoring ML Systems in Production", AC215/E115, Pavlos Protopapas (SEAS/Harvard). These are the instructor's lecture slides (PDF), provided by the student for study; the PDFs are not in this repository; slide numbers are PDF page numbers. The page numbers printed in the slide footers fall behind the PDF numbering from slide 10 on (slide 10 is printed "9", slides 38–43 are printed 34–39, slides 55–59 are printed 41–45, and slides 16 and 17 both say "16"), so always cite the PDF number. Everything below is a summary in our own words. Quotes are limited to short titles, labels, names and formulas. L17 has no tutorial repository (`course/lectures.yaml`: `tutorials: []`, and the course tutorials page lists only the Ed lesson for this lecture). Where this digest compares the lecture's naming with "the tutorials", it means the repositories of neighbouring lectures, as recorded in our study guides (L07, L13, L15, L22, L23).
 
+## 中文速览
+
+- **这一讲讲什么：** L17 没有 tutorial，也没有 video，只有一份 62 页的 slides（"Lecture 17: Evaluating and Monitoring ML Systems in Production"）。开场的 hook 是 Zillow：model 安静地错了好几个月，一周蒸发了约 $8B market value（slide 3）。核心对比：training time 的 test set 是冻住的，serving time 的 data 一直在变；slide 10 把这个 gap 叫 "Training-Serving Skew"（slide 39 又用它的窄义：training 和 serving 两条 pipeline 算 feature 的方法不一样）。
+- **Idea 1 · 三层 monitoring：** Data Quality（inputs 坏了没有：nulls、schema change）、Model Performance（判断有没有退化：accuracy、precision、calibration）、System Health（infrastructure 撑不撑得住：latency、errors、resources）（15）。slide 17 的连线把 item 1 和 item 3 画反了：latency spike 属于 System Health，precision 掉 8% 属于 Model Performance。
+- **Idea 2 · data drift 用 KS test：** 每个 feature 拿最近的 rolling window 跟 reference distribution（training set，或上线后稳定的 "golden" 30 天）比；D 是两条 empirical CDF 之间最大的竖直距离，超过 D_critical 就是 drift signal（18–19）。在 production 里它是 Airflow 或 cron 跑的 scheduled batch job，结果推到 metrics store 和 dashboard（20）。50 多个 feature 天天测，一定会有 false positive，所以要做 multiple-testing correction，或者连续 2–3 个 window 都超了才 alert；alert 是叫人来 investigate，不是 auto rollback（21）。
+- **Idea 3 · concept drift 和 retraining：** inputs 看起来正常，但 feature → outcome 的关系变了。key method 是 prediction-to-outcome tracking：ground truth 回来以后画 predicted vs actual，看 gap 是不是越拉越大（22）。label 来得慢，就用 streaming detectors（ADWIN、DDM/EDDM、Page-Hinkley，都在 River 里），或者 NannyML 的 CBPE（用 model 的 confidence 估 accuracy）（23–25）。retrain 要按事先定好的 policy，challenger 先赢过 champion 才能上线（26）。
+- **Idea 4 · 四种 rollout：** shadow（新 model 照样打分，但没人用它的结果）、canary（一小部分真实 traffic 给新 model）、blue-green（两套完整环境，一个开关切过去，也能一下切回来）、A/B（故意 50/50 分流，比 business metric）（27–29）。slide 28 的 fraud team 要求新 model 还不能 block 任何人，四种里只有 shadow 让旧 model 继续决定每一笔交易。
+- **Idea 5 · drift 之外的 failure：** Zillow 是 concept drift，本来有三个 signal 可以早点响：自家房子的 days-on-market、predicted vs actual resale gap、inventory 里压了多少钱；但总得有人（或者 alert、agent）真的在看（31–36）。另外还有 feedback loop（Tay、recommender → monitor output diversity）、pipeline bug（Uber → feature store + feature parity check，slide 说约 40% 的问题出在这里）、hardware（sensor decalibration、脏镜头、clock desync、thermal throttling，KS test 都看不见）（11–13, 38–44）。
+- **Idea 6 · GenAI：** 没有唯一正确答案，最要紧的 failure 是 unsafe 或 harmful output；jailbreak 是专门绕过 safety training 的 prompt（46）。defense in depth 有三层：system prompt（单独用最弱）、refusal training（RLHF/DPO）、外部 classifiers（47）。五个 incident 各缺一个 control：Bard 没有 fact-check gate，Samsung 没有 outbound classifier，Mata v. Avianca 没有核对 citations，Air Canada 没有 grounding，Replit 的 code freeze 只写在 prompt 里（48–52）。KS test 换成 classifiers，prediction-to-outcome 换成 LLM-as-judge，而 judge 自己也会错（53）。
+- **和 tutorials 的关系：** 没有任何 tutorial 跑 drift test、prediction-to-outcome tracking 或 production alerting；唯一的 alert 是 Tutorial 0 的 billing budget alert，L21 CI 的 Slack 消息又只在成功时才发。用得上的地方：L15 把 preprocessing 放进 serving signature 防 skew，`traffic_split` 可以做 canary（E5）；L22/L23 的 rolling update 不属于四种 rollout 之一；L13 notebooks 里有一个真实的 preprocessing mismatch（E13）；L07 有 approval gates 和 golden-case evaluation。每个 idea 在哪个 guide 的哪一节用到，见文末的 [Where this shows up in the tutorials](#where-this-shows-up-in-the-tutorials)。
+
 ## Outline
 
 - Slide 1 · Title: "Lecture 17: Evaluating and Monitoring ML Systems in Production".
@@ -264,7 +275,7 @@ The slides show no shell commands, no Python and no configuration. The only code
 
 - Slide 60, "Tutorial": this week's hands-on tutorial is on the course tutorials page, `harvard-iacs.github.io/2026-AC215/tutorials_demo`. The course's tutorial entry for Lecture 17 lists only the Ed lesson, and `course/lectures.yaml` records no repository.
 - Slide 61, "Readings": `harvard-iacs.github.io/2026-AC215/readings`. In the copy of the course site checked for this digest, the readings page has sections only for virtual environments and containers, and nothing for this lecture.
-- Slide 8 recaps the previous lecture (in our map, L16 "System Tradeoffs"): public and private subnets, NAT and Internet gateways, one immutable image for dev and prod, and a decision framework. There is no L16 digest or guide in this repository.
+- Slide 8 recaps the previous lecture (in our map, L16 "System Tradeoffs"): public and private subnets, NAT and Internet gateways, one immutable image for dev and prod, and a decision framework. There is no L16 study guide; the L16 slide digest is [L16-system-tradeoffs.md](L16-system-tradeoffs.md).
 - Slides 6–7 point back to the project timeline (L12) and the cheese-app ML pipeline on Vertex AI (L13, L15).
 - In-class activities:
   - the layer-matching quiz (16–17)
@@ -290,3 +301,125 @@ The slides show no shell commands, no Python and no configuration. The only code
     - L22 and L23 (Kubernetes rolling updates)
     - L07 (approval gates and deterministic evaluation over golden cases, the code-level counterpart of slides 47, 52 and 53)
     - L11 (whose lecture title mentions monitoring; the guide points ahead to this lecture for it)
+
+## Where this shows up in the tutorials
+
+L17 has no tutorial and no video of its own, and no tutorial in the course builds production monitoring. Its ideas still turn up all over the course. Sometimes a tutorial builds the check (an approval gate, a serving signature, a traffic split). More often the tutorial's own code contains the failure that one of the lecture's signals would have caught. The first table takes each key idea above and lists the study-guide sections where it appears. Each row starts with a status in bold: **Applied** (a tutorial builds it, or its code shows the exact failure the idea warns about), **Pieces only** (some ingredients exist, but nothing joins them into the check) or **Not applied**. "[L15] §3.2" means section 3.2 of that lecture's study guide, and "Lecture slides" means the guide's *Lecture slides* section. The video folder for each guide is listed at the end.
+
+### Key ideas → tutorials
+
+| # | Key idea (slides) | Where the tutorials apply it |
+|---|---|---|
+| 1 | Production failures are quiet, and the signals are usually there (3, 36, 59) | **Applied, as failures.** [L15] §6 item 10 and E7: with `sync=False` a crashed training job leaves the pipeline step green, and Model Deploy can deploy the previous run's model. [L08] §4 Step 6: generation errors are caught and printed per batch, so `--generate` "succeeds" with data missing. [L20] §6 item 13: the vector-DB loader exits 0 even when ChromaDB was not ready, leaving an empty collection. In each case the evidence was in a log that nobody was asked to read. |
+| 2 | The test set is frozen; production data is not (10) | **Applied, the training-time half only.** Every model in the course is judged once, on held-out data: [L13] §3.1 (five classifiers on 116 test images, where one image is 0.86%) and [L08] §3.8 (loss and perplexity on 100 test examples). Nothing measures the serving side. [L23] §3.7: the app serves a fixed CNN downloaded from a GitHub release. The one live data source already shifts under the code: [L15] §4 B2, the collector scrapes Bing with a regex and indexes 0 images when Bing changes its HTML. |
+| 3 | A system that learns from live input needs a gate (11–13) | **Applied.** [L07] §3.5: memory is a separate store that only the host writes, and the model has no memory-write tool, so nothing a user says is "learned" without passing code. [L07] §3.3: retrieved text enters the conversation labelled as data, not instructions. [L06] §3.8: a model's proposal changes nothing until a later human turn approves it. |
+| 4 | Monitor three layers: Data Quality, Model Performance, System Health (15–17) | **Applied, mostly before deployment.** Data quality: [L15] §4 B3, the data processor removes duplicates with difPy and deletes files that are not decodable JPEGs before training. Model performance: [L13] §3.1–3.2, accuracy and `val_accuracy` per run, tracked in W&B (offline only). System health: [L14] §3.2 (cold starts are latency), [L22] §3.6 (an HPA scales on CPU measured against the Pod's requests; the repo configures none), [L22] §6 item 13 (no readiness probe, so 502/503 for the first minute after a deploy), [L23] §3.8 (the load balancer health-checks the API on `/api-service/`). |
+| 5 | Detect data drift by comparing distributions (KS test) (18) | **Not applied.** No tutorial compares a live feature distribution with a training-time one. |
+| 6 | The KS statistic D and its critical value (19) | **Not applied.** |
+| 7 | Running KS in production is a scheduled batch job (20) | **Pieces only.** A reference sample: [L11] §3.6, a git tag such as `dataset_v20` names an exact dataset that `dvc get --rev` can rebuild, which is what a "golden" reference needs. A job runner: [L15] §3.7 (a CLI container submits a Vertex pipeline) and [L23] §4 Part E (a commit message submits it), both on demand and never on a schedule. No result goes to a metrics store or a dashboard. |
+| 8 | Make drift alerts trustworthy (18, 21) | **Pieces only, from testing.** A check that stays silent: [L09] §3.3, "skipped" is not "passed" (system tests skip when the server is down, and the run stays green). A check that over-fires: [L07] Exercise 8, an injection detector that quarantines a harmless quoted document on purpose, to show that heuristics over-block and that the real protection sits downstream. No tutorial routes an alert to an on-call person. |
+| 9 | Concept drift: track predictions against outcomes (22) | **Pieces only.** Predictions are logged: [L18] §3.6, every chat is saved as JSON under `/persistent/chat-history/`. Outcomes are what labelling produces: [L11] §3.1, each annotation is a ground-truth record. No tutorial joins the two over time. |
+| 10 | Streaming detectors when labels are late (23) | **Not applied.** |
+| 11 | Estimate performance without labels (CBPE) (24–25) | **Not applied.** The raw material is there: [L15] §3.3, the endpoint returns the full softmax vector, and the client keeps only the argmax. CBPE works from those confidences. |
+| 12 | Retrain by a policy agreed in advance; champion/challenger (26) | **Applied for prompts; missing for models.** [L07] §4 A12 and §3.8: the "live A/B" runs the current prompt and a copy with one change over the same golden cases, and `--compare` lists per-case improvements and regressions and flags confounding changes. That is a challenger tested against a champion. For models the gap is explicit. [L23] Lecture slides, idea 5, and §3.7: retraining starts when someone types `/run-ml-pipeline`, no metric is checked before the deploy, and the app never calls the new endpoint. [L13] §3.1 shows why a challenger needs a margin: on 116 test images a two-image gap is noise. |
+| 13 | Four rollout strategies (27–29) | **Applied (canary only).** [L15] §3.2: one endpoint can route a percentage of requests to each deployed model. [L15] E5: deploy a second model to the same endpoint with `traffic_split={"0": 20, "<old id>": 80}`. The tutorial itself sends 100% to one model on a fresh endpoint ([L15] Lecture slides). [L22] §3.2 and [L23] §3.4: new image tags roll the Deployments with Kubernetes' default rolling update, which replaces Pods one at a time and is none of the four. No tutorial does shadow, blue-green or an A/B test on users. |
+| 14 | Zillow passed every offline test and still failed (31–34) | **Applied, as a lesson about green checks.** [L09] §3.6: the guest lecture's babykev reaches "All green, and the mask is wrong", with 92 passing tests and 94% coverage while the model's attention mask is still wrong. [L07] §3.8: passing fixture runs test the machinery, not the model. |
+| 15 | Three signals could have fired earlier; someone has to watch (35–36) | **Applied, mostly as gaps.** A business-level monitor: [L01] §7, Tutorial 0's billing budget alert, the only alert the course has you set up; [L15] §2 shows why it matters (an endpoint bills 24/7 with zero traffic). Someone watching: [L21] §3.8 and §6 G8, the CI's Slack step posts only on success, so a failed run is never announced. [L22] Lecture slides, idea 1: on one VM a person has to notice a crashed container. [L22] §3.2: a ReplicaSet notices a deleted Pod and replaces it by itself. |
+| 16 | Recommenders can poison their own training data (38) | **Pieces only.** No tutorial retrains on its own outputs. The nearest case is one step of the loop: [L08] §3.2, a teacher LLM writes the training data, so its hallucinations become the student's training targets. |
+| 17 | Training–serving skew as a pipeline bug; feature parity (39) | **Applied.** The fix: [L15] §3.1, the preprocessing lives inside the SavedModel's serving signature, so every client sends raw JPEG bytes and one definition serves them all; [L15] Lecture slides, idea 4, calls the alternative "client-side brittleness". The bug: [L13] §9 E13, the notebooks train on `image/255` and predict with `preprocess_input`. Its infrastructure cousin: [L15] §9 erratum 10, the pipeline trains with TF 2.17 and serves with a TF 2.12 container. |
+| 18 | Hardware faults look statistically normal (40–44) | **Not applied.** No tutorial touches sensors or edge devices. The nearest device telemetry is [L13] §3.1: W&B records CPU and GPU utilisation for training runs. |
+| 19 | GenAI has no single right answer; jailbreaks (46) | **Applied.** [L07] §3.8: evaluation grades properties over the trace rather than exact text, and repeats each case because the same input gives different outputs. Prompt injection, the jailbreak's cousin: [L07] §3.3 (retrieved text labelled as data) and Exercise 8 (`detect_injection`). |
+| 20 | Defense in depth: system prompt, refusal training, classifiers (47) | **Applied.** The system prompt and its weakness: [L05] §9 E1 and Ex 4, the RAG system instruction is defined but never sent, so nothing redirects an off-topic question; [L06] §3.8, a prompt says "no monetary amounts" and code still checks with a regex. Refusal training, switched off: [L08] §4 Step 6 generates its data with Gemini's safety filters set to `OFF`. Independent checks: [L07] Exercise 8 (an injection detector) and [L06] §4 Part A (the quiz output must pass a JSON-schema check, cell 62). |
+| 21 | Each GenAI incident maps to a missing control (48–52) | **Applied.** Review gate (Bard): [L06] §3.8 (a human "yes" before a plan is final), [L07] §3.4 (manager approval bound to a fingerprint of the exact cart) and §3.5 (human review of an email). Outbound control (Samsung): [L07] §3.6, recipients are checked against an allowlist in code. Citation check (Mata v. Avianca): [L06] §3.8, newsletter sources are registered only from search citation metadata. Grounding (Air Canada): [L05] §3.1 and §3.6, answers built from retrieved chunks. Permission boundary (Replit): [L07] §3.1, no Act 1 tool can place an order, whatever the prompt says, and §3.6, a skill gives guidance, never permission. |
+| 22 | The principle carries over; LLM-as-judge (53) | **Applied, without a judge model.** [L07] §3.8: golden cases, repeats, immutable labels and property checks over traces; the final prose goes to a five-point human review. [L08] §3.8: loss and perplexity measure style fit, not correctness. No tutorial uses one LLM to grade another. |
+| 23 | Match the signal to the failure type (55–57, 59) | **Pieces only.** No tutorial practises the matching, but the course's own failures make a good drill: see the practice table below. |
+| 24 | Every cloud does the same five jobs (58) | **Applied, except streaming.** See the slide 58 table below. |
+
+14 of the 24 ideas are applied in at least one tutorial, although ideas 1, 2, 12 and 15 mostly as failures or gaps that the tutorial shows. Five have pieces only (7, 8, 9, 16, 23). Five are not applied at all: the statistical detectors (5, 6, 10, 11) and hardware faults (18).
+
+### The slide 58 table, row by row
+
+| Layer (slide 58) | GCP product on the slide | What the course uses |
+|---|---|---|
+| General logging | Cloud Logging | Used without being set up: Vertex custom jobs ([L13] §3.4), Cloud Run ([L14] §5) and Vertex endpoints ([L15] §6) send stdout and server logs there. On the cluster: `kubectl logs` ([L22] §4 Part C). Agent runs: events and spans in SQLite ([L07] §3.8). |
+| Metrics & dashboards | Cloud Monitoring | Training only: W&B charts and system metrics ([L13] §3.1–3.2), and L07's evaluation scorecard for agent runs ([L07] §3.8). No serving metrics anywhere. |
+| Feature/prediction store | BigQuery, Firestore | Neither. The nearest thing is chat history as JSON files on a persistent volume ([L18] §3.6; [L22] §3.5 puts it on a PVC). |
+| Streaming ingestion | Dataflow, Pub/Sub | None. |
+| Drift monitoring (managed) | Vertex AI Model Monitoring | None. L15 deploys to the same kind of Vertex endpoint that this product watches, but creates no monitoring job ([L15] Lecture slides). |
+| Alerting | Cloud Monitoring Alerts | A billing budget alert ([L01] §7), and a CI Slack message that fires only on success ([L21] §3.8, §6 G8). |
+
+### Practice: the course's own failures, matched to a signal
+
+Slides 55–57 drill matching a failure to the signal that would catch it. The tutorials supply their own cases. The first two columns come from the guides. The signals are our suggestions, in the lecture's vocabulary; cover the last column and try it first.
+
+| Failure in a tutorial | What broke | A signal that would catch it *(ours)* |
+|---|---|---|
+| [L13] §9 E13: training scales by `/255`, prediction uses `preprocess_input` | Engineering bug: training–serving skew | A feature parity check (push the same images through both paths and compare the tensors), or move the preprocessing into the model as [L15] §3.1 does |
+| [L15] §6 item 10, E7: a crashed training job leaves the step green, and the previous model gets deployed | Engineering bug in the pipeline | Fail the step when the job fails (`sync=True`, as E7 says), and check that the model on the endpoint comes from the latest run |
+| [L15] §9 erratum 10: trained with TF 2.17, served by a TF 2.12 container | Infrastructure: version skew | A version parity check at deploy, plus a smoke prediction on known images after it |
+| [L22] §6 item 13: 502/503 for the first minute after a deploy | System health | A readiness probe, and an error-rate monitor at the load balancer |
+| [L21] §6 G8: failed CI runs never reach Slack | The alert path itself | Test the alert with a deliberately failing run |
+| [L05] §9 E1: the RAG system instruction is never sent | A missing GenAI defense layer | A golden off-topic question whose expected answer is a redirect ([L05] Ex 4) |
+| [L08] §4 Step 6: failed generation batches are printed and skipped | Data quality | Count and schema-check the generated rows before upload |
+| [L23] §3.7: each pipeline run deploys an endpoint nothing calls, while the app keeps a fixed CNN | No champion/challenger; the model is never replaced | Monitor which model version serves production traffic, and how old it is |
+
+### Questions to answer after the lecture
+
+1. Why is a good score on a held-out test set not evidence that a deployed model is fine? Which two senses of "Training-Serving Skew" do slides 10 and 39 use? (10, 39)
+2. What control was missing in Tay's case, and why is it a feedback-loop failure rather than data drift? What went wrong at the accidental relaunch? (11–13) Compare how L07 keeps the model from writing its own memory (guide §3.5).
+3. Name the three layers of production monitoring, the question each one asks, and two metrics for each. (15)
+4. Sort slide 16's three symptoms into the layers. Are slide 17's answer lines right? (15–17)
+5. What does the KS statistic D measure? Sketch two empirical CDFs and mark D. How does D_critical change as the samples grow? (18–19)
+6. What can serve as the reference distribution? How often should the test run for a fast-moving feature and for a slow one, and where do its results go? (18, 20)
+7. You test 50 features a day at α = 0.05, and nothing has changed. About how many alerts do you get, and which two remedies does slide 21 give? What should a drift alert trigger, and what should it never trigger by itself? (21)
+8. How does concept drift differ from data drift, and why can a KS test on the inputs miss it? What does prediction-to-outcome tracking plot? (22)
+9. The labels arrive months late. Which two kinds of tool help before they arrive, and what does each one look at? (23–25)
+10. Write a retraining policy in one sentence. What must a challenger show before it replaces the champion? (26) How does L07's `--compare` do this for prompts (guide §3.8)?
+11. For each rollout strategy, whose output is acted on, and what do you learn from it? Which one fits the fraud team on slide 28? Which strategy does L15's Exercise E5 build, and why is the rolling update of L22 and L23 none of the four? (27–29)
+12. Tell the Zillow story as before, during and after. Which three signals could have fired earlier, and what type is each? (31–36)
+13. Why does a recommender need output-diversity monitoring, not just accuracy? (38)
+14. What is a feature parity check, and why does a shared feature store make skew less likely? Find the skew in L13's notebooks (guide §9 E13), and say how L15 §3.1 avoids it. (39)
+15. Why can't a KS test catch a dirty camera lens or a throttled inference chip? What check would, and does it run before or after the model? (40–44)
+16. Why is a system prompt, on its own, the weakest of the three GenAI defense layers? Give one tutorial where a rule written in a prompt was not enforced. (47; L05 §9 E1, L06 §3.8)
+17. For each incident on slides 48–52, name the missing control and where it sits in the system. (48–52)
+18. What replaces KS tests and prediction-to-outcome tracking for generative systems, and what new risk does an LLM judge bring? (53)
+19. Fill in slide 55's signal column before you look at slide 56. Then cover the last column of the practice table above and do the same. (55–56)
+20. Name the five jobs of every monitoring stack, and the GCP product for each on slide 58. Which of them did you use in the course? (58)
+
+### Study guides and video folders
+
+The guides are in this repository's `guides/`. The video folders are in the Explainer_Videos repository under `videos/`, and each one already holds the episode's `digest.md` and `SLIDES.md`. The course map in `README.md` shows which videos are out; when this was written, only L01's was. The table lists the lectures cited above.
+
+| Lecture | Study guide | Video folder |
+|---|---|---|
+| L01 | [L01] `L01-vms-venvs.md` | `ac215-l01-vms-venvs` |
+| L05 | [L05] `L05-rag.md` | `ac215-l05-rag` |
+| L06 | [L06] `L06-agents-1.md` | `ac215-l06-agents-1` |
+| L07 | [L07] `L07-agents-2-harness.md` | `ac215-l07-agent-harness` |
+| L08 | [L08] `L08-llm-finetuning.md` | `ac215-l08-llm-finetuning` |
+| L09 | [L09] `L09-ci-testing-precommit.md` | `ac215-l09-ci-testing` |
+| L11 | [L11] `L11-data-labeling-versioning.md` | `ac215-l11-data-labeling-versioning` |
+| L13 | [L13] `L13-training-workflows.md` | `ac215-l13-training-workflows` |
+| L14 | [L14] `L14-serverless-deployment.md` | `ac215-l14-serverless-deployment` |
+| L15 | [L15] `L15-vertex-ml-workflows.md` | `ac215-l15-vertex-ml-workflows` |
+| L18 | [L18] `L18-apis-frontend.md` | `ac215-l18-apis-frontend` |
+| L20 | [L20] `L20-deployment-pulumi.md` | `ac215-l20-deployment-pulumi` |
+| L21 | [L21] `L21-cicd-github-actions.md` | `ac215-l21-cicd-github-actions` |
+| L22 | [L22] `L22-kubernetes-cloud.md` | `ac215-l22-kubernetes-cloud` |
+| L23 | [L23] `L23-final-cicd-deployment.md` | `ac215-l23-final-cicd` |
+
+[L01]: ../guides/L01-vms-venvs.md
+[L05]: ../guides/L05-rag.md
+[L06]: ../guides/L06-agents-1.md
+[L07]: ../guides/L07-agents-2-harness.md
+[L08]: ../guides/L08-llm-finetuning.md
+[L09]: ../guides/L09-ci-testing-precommit.md
+[L11]: ../guides/L11-data-labeling-versioning.md
+[L13]: ../guides/L13-training-workflows.md
+[L14]: ../guides/L14-serverless-deployment.md
+[L15]: ../guides/L15-vertex-ml-workflows.md
+[L18]: ../guides/L18-apis-frontend.md
+[L20]: ../guides/L20-deployment-pulumi.md
+[L21]: ../guides/L21-cicd-github-actions.md
+[L22]: ../guides/L22-kubernetes-cloud.md
+[L23]: ../guides/L23-final-cicd-deployment.md

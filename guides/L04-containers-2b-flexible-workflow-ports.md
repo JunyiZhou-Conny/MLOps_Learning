@@ -14,6 +14,7 @@
 - **最费时间的坑（Part B）：** 手动那几步做完不清理就 `docker compose up`，会报 `Conflict. The container name "/processor" is already in use`，因为 compose file 钉死了同样的 container name；只剩 network 的话，Compose v5.6.0 只 warn 一下就用它，但之后 `down` 不会删它。Step 3 "It should fail" 的时候页面什么都不变（没有 error handling），要看 `docker logs gateway` 最后一行的 `ConnectionRefusedError: [Errno 111] Connection refused`。
 - **安全坑 + errata：** 没有任何 branch 有 `.dockerignore`，`COPY --chown=app:app . ./` 会把 L03 留在 component 里的 `secrets/mega-pipeline.json` 拷进 image（实测用一个 stand-in 文件确认），`prod` 再把它 push 到 Docker Hub。切完 branch 就删掉 component 里的 `secrets/`，再加一个写着 `secrets/` 的 `.dockerignore`。另外：`translate_text` 代码里是 `target_language="es"`，下一步却是 French voice；README 没给建 bucket 的命令，Appendix 示例里的文件名 `test.mp3` 也过不了后面 `input-*` 的 glob。
 - **做完要删：** SA key（IAM & Admin → Service accounts → Keys）；课程不再用 bucket 时删掉它；本地五个 `mega-pipeline-*` image（transcribe 1.48 GB，其余 821–836 MB）和 `run` 拉下来的 `dlops/...` image；`run` 留下的 root-owned `Pipfile`；跑过 `prod` 就 `docker buildx rm multi-arch`；port_toy 里 `docker compose down`，再删 `toy-*` / `port_toy-*` image（共享 layer，合计约 200 MB）。API 按用量计费，跑完没有东西在后台烧钱。
+- **Lecture slides：** 老师的 Lecture 4 slides（44 页；4–15 build optimization，16–31 Compose，32–35 networking，36–41 team workflows，42–43 就是这两个 tutorial；4–41 页是 Lecture 3 slides 30–69 页的修订版）和这份 guide 各节怎么对应、做 tutorial 需要的 10 个 lecture ideas，以及 slides 和今天 README/capture 不一样的 12 处，都在下面的 [Lecture slides](#lecture-slides)。最要紧的两处：① slides 大多写 `-p 8090:9100`（host 上所有地址都开门），port_toy 写 `-p 127.0.0.1:8090:9100`（只有本机），照 README 打；② slide 7 说先 `COPY . .` 再装依赖是 "classic mistake"，而 mega-pipeline 的五个 Dockerfile 正是先 `COPY --chown=app:app . ./` 再 `RUN uv sync`，所以 `--download` 往 folder 里写了东西之后，下一次 `./docker-shell.sh` 会重跑这两步（实测 9.4 s，没变化时 0.3 s）。
 
 ## At a glance
 
@@ -100,6 +101,59 @@
 - **Colab notebooks:** none for this lecture. **Ed lesson:** not accessible when these sources were checked (Q6); the course-site source above was used instead.
 
 </details>
+
+## Lecture slides
+
+The instructor's deck for this lecture is *Lecture 4: Containers II-b* (`L04_containers_ii-b`), 44 slides. Slide numbers are PDF page numbers; the printed footers differ.
+- Slides 4–15 cover build optimization, 16–31 Docker Compose, 32–35 networking and 36–41 team workflows. Slides 42–43 introduce this lecture's two tutorials, `mega-pipeline` `flexible-workflow` and `port_toy`.
+- Slides 4–41 are a revised copy of the Lecture 3 deck's slides 30–69. Compose and networking (16–35) teach with the same gateway → processor app and the same ports as `port_toy`, under other names.
+
+The slides are not reproduced here; what follows is in our own words. The full slide digest and the cross-check with the video are in the Explainer_Videos repo, in `videos/ac215-l04-flexible-workflow-ports/SLIDES.md`. This answers the slides half of §9 Q6.
+
+**Map**
+
+| This guide | Slides |
+|---|---|
+| At a glance; §1 What you build | 42–43 (the two tutorials); 37–41 (the team workflow behind part A); 17–18 (the gateway/processor app of part B) |
+| §2 Prerequisites and costs | 42 (your own bucket, secrets and authentication, APIs); 5–6, 10 (what a big image costs) |
+| §3 C1 Build or pull; §6 G7; §9 E1, E18 | 21, 37–41 |
+| §3 C2 The wrapper script | 17–19 (starting containers by hand doesn't scale), 42 (the provided script) |
+| §3 C3 Bind mounts and the venv | 23–24 (bind mounts); 11 (a multi-stage build keeps the venv in `/app`) |
+| §3 C4 Runtime secrets; §6 G6; §9 E7 | 8 (`.dockerignore`); 12, 15 (layers only add; `ENV`, `ARG` and `COPY` leak a secret); 14 (build-time secrets); 23 (`:ro`) |
+| §3 C5 Multi-architecture images; §6 G8, G17 | 13 |
+| §3 C6 Networks and DNS; §6 G11 | 22, 33–34 |
+| §3 C7 Ports; §6 G14, G15 | 35 |
+| §3 C8 Compose; §4 B15–B18; §6 G12 | 19–22, 25–30; 31 (when Compose isn't enough) |
+| §4 A7–A13 (builds, `dev`, `run`, `prod`, clean-up) | 7 (cache order), 10–12 (base image, multi-stage, one `RUN` chain), 13, 37–40 |
+| §4 B3–B14 (`port_toy` by hand) | 7, 12 (the two Dockerfiles), 17, 26 (run-time settings), 33–35 |
+| §8 D2 Rebuild or not? | 26, 7 |
+| §5 Code tour, §7, the rest of §8 and §9 | 12, 20, 34 for the code-tour excerpts; 31, 37–41 for §7; otherwise tutorial-only |
+
+**Lecture ideas you need for this tutorial**
+1. **Build or pull.** Early in a project everyone builds from the Dockerfile and uv files in Git and sends changes back as pull requests. Later the lead also pushes images to Docker Hub and the others pull. No workflow is perfect: agree on the rules (slides 37–41).
+2. **Cache order.** Each instruction is a cached layer, and a change rebuilds everything below it. Copy the dependency files and install before copying the code (slide 7).
+3. **The build context.** `.dockerignore` decides what Docker sends to the builder: keep out secrets, caches, local venvs and data (slide 8).
+4. **Layers only add.** Install and clean up in the same `RUN`. A file deleted in a later layer, such as a copied key, still sits in the earlier one (slides 12, 15).
+5. **Ship only what runs.** Slim is the default base when your packages have wheels; a builder stage keeps compilers out of the final image (slides 5–6, 9–11).
+6. **Target platform.** Apple Silicon builds arm64, while clouds may run amd64; a multi-platform build goes straight to a registry (slide 13).
+7. **When a variable exists.** `ENV` lives in the build, the image and the container; `ARG` only in the build; `-e` and `environment:` only in the running container, so changing them needs no rebuild (slides 25–26).
+8. **Networks and names.** Each container has its own network namespace. On one user-defined network, containers reach each other by name through Docker DNS; Compose sets this up for you (slides 22, 33–34).
+9. **Publishing a port.** `-p HOST:CONTAINER` forwards one port of your laptop into one container; the internal service gets none (slide 35).
+10. **Compose.** Each `docker run` flag becomes a YAML key, and a service's name is its hostname. `depends_on` orders start-up but doesn't wait until the app is ready; a healthcheck does. `down` removes the containers and the network, and `down -v` also the named volumes (slides 19–20, 27–29).
+
+**Where the slides and today's tutorial differ** (the READMEs and the 2026-10-14 captures decide)
+- **Publish address.** Most slides publish `8090:9100`, which opens the port on every address of your laptop. `port_toy` writes `127.0.0.1:8090:9100`, this laptop only. Captured, the short form shows `0.0.0.0:8091->9100/tcp` and collides with a running `127.0.0.1:8090` (§4 B8). Type the README's form.
+- **Names.** The slides use `app-net`, `gateway-img` and `processor-img`, and pull the processor as `ac215/processor:1.0`. `port_toy` uses `toynet`, `toy-gateway` and `toy-processor`, and builds both images; `ac215/processor` is not on Docker Hub (checked 2026-10-16). Same app, same ports, same variables.
+- **Compose file name.** The slides prefer `compose.yaml`; `port_toy` has `docker-compose.yml`. Compose reads either.
+- **The by-hand version.** The slides' by-hand gateway run already has `-v "$PWD/gateway:/app"`. `port_toy`'s Step 1 has none, so here `volumes:` first appears in the compose file.
+- **Cache order.** Slide 7 calls copying the code before installing the dependencies the "classic mistake". All five mega-pipeline Dockerfiles do that (`COPY --chown=app:app . ./`, then `RUN uv sync`). After `--download` had created folders, a rebuild re-ran both steps: 9.4 s instead of 0.3 s (§6 G9).
+- **`.dockerignore`.** Slide 8 says to filter the build context and that secrets must never enter the image. No branch has one, and an old key ended up inside an image (§6 G6). Add one.
+- **Build tools in the image.** Slides 10–11 keep compilers in a builder stage. These images are single-stage and keep `build-essential` (and `ffmpeg`): 821 MB to 1.48 GB on a 195 MB base (§4 A13). Changing that is optional.
+- **Where the venv lives.** Slide 11 puts it in `/app/.venv`. This branch puts it in `/home/app/.venv`, because `docker-shell.sh` mounts your folder over `/app` (§3 C3).
+- **Multi-platform build.** Slide 13 uses one plain `docker build --push --platform …` line. `prod` creates its own `multi-arch` builder, then runs `docker buildx build` (§3 C5, §6 G8). Not captured.
+- **Secrets mount.** The slides' example mounts `./secrets:/secrets:ro`, read-only; `docker-shell.sh` mounts `/secrets` read-write.
+- **Scenario 2's images.** In the slides the lead keeps the Docker Hub images current. The script's `dlops/*:latest` images are from 2025-02-18: Python 3.8.17 with pipenv (§9 E1). Build locally until your team pushes from this branch.
+- **Base images and sizes.** Slide 10 lists `python:3.14-slim` at about 217 MB. This branch uses `python:3.14-slim-bookworm`, and Docker Engine 29.8.2 listed 179–195 MB of disk usage for the two slim bases (the capture's rebuilt copies). The sizes are approximate.
 
 ## Command checklist
 
