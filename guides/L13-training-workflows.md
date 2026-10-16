@@ -13,6 +13,7 @@
 - **最费时间的坑：** ① 2026 年 `sh docker-shell.sh` 会卡在 `model-training/Dockerfile:36-37`：apt 里已经没有 `google-cloud-sdk`，把 `model-training/Dockerfile:37` 改成 `apt-get install -y google-cloud-cli jq docker-ce`，并且保留 `--platform=linux/amd64`。② `export WANDB_KEY=...` 必须在 **host** terminal、在 `sh docker-shell.sh` 之前做；漏了的话 job 要等下载完 305 MB 的 dataset 才在 `wandb.login` 报 `api_key not configured (no-tty)`，钱已经花了。进 container 先 `echo ${#WANDB_KEY}`，classic key 应该是 `40`。③ bucket 名字全局唯一：`model-training/docker-shell.sh:8-9` 的 bucket `gs://cheese-app-trainer` 和 project `ac215-project`、notebook 里的 bucket `cheese-app-models` 都是老师的，全部改成自己的。
 - **别被吓到，也别被骗：** repo trainer 的 loss ≈ 100 不是 diverge，是 L1 regularization（0.02）的 penalty，看 accuracy；job 显示 succeeded 之后 trained model 根本没保存，VM 一删就没了（L15 才加 `tf.saved_model.save`，Exercise 4 自己补）。
 - **做完要删：** 在 container 里 `gsutil rm $GCS_BUCKET_URI/cheese-app-trainer.tar.gz`（或者删整个 bucket），然后 `exit`（`--rm` 会删掉 container）；console 里确认没有 `RUNNING`/`PENDING` 的 job（卡住的用 `gcloud ai custom-jobs cancel JOB_ID --region=us-central1`）；Notebook B 最后自己跑 `wandb.finish()`，两个 Colab 都 *Runtime → Disconnect and delete runtime*；学期结束删掉 `model-trainer` 的 key，rotate W&B key。
+- **Lecture slides：** 老师的 Lecture 13 slides（31 页）和这份 guide 各节怎么对应、做 tutorial 需要的 10 个 lecture ideas，以及 slides 和今天 repo 不一样的 9 处（最要紧的两处：slide 15 的 `WandbCallback` 已经从 repo 删掉，所以 W&B 里没有 loss/accuracy curve；`cli.sh` 默认跑 CPU，不是 GPU），都在下面的 [Lecture slides](#lecture-slides)。
 
 ## At a glance
 
@@ -60,6 +61,47 @@
 - **How to read the references.** Paths are written from the folder that holds your clones: `model-training/package/trainer/task.py:153` means line 153 of `package/trainer/task.py` inside your `model-training` clone. A bare `README.md:N` is `model-training/README.md`. Third-party paths (`wandb/...`, `aiplatform/...`) are inside the named package version. `ml-workflow/...` and `model-deployment/...` are the L15 repos, cited only in §7 and §8.
 
 </details>
+
+## Lecture slides
+
+The instructor's deck for this lecture is *Lecture 13: Advanced Training Workflows: experiment tracking (W&B), multi-GPU, serverless training (Vertex AI)*, 31 slides. Slide numbers are PDF page numbers. The slides are not reproduced here; what follows is in our own words. The full slide digest and the cross-check with the video live in the Explainer_Videos repo, in `videos/ac215-l13-training-workflows/SLIDES.md`.
+
+**Map**
+
+| This guide | Slides |
+|---|---|
+| At a glance; §7 Where this sits in the course | 2 (milestones), 5 (the three levers), 6 (Cheese App roadmap), 10 (data versioning "later"), 21 (Pipelines → L15) |
+| §3.1 Experiment tracking; checklist *Notebook A* | 8–11 |
+| §3.2 W&B run lifecycle; checklist *Notebook B*; §4 A8; Exercise 1 | 12–17 |
+| §3.3 From notebook to Python package; §4 B9–B10 | 23–24 |
+| §3.4–3.5 Serverless training, two identities; §4 B11–B14 | 19–22, 24–25 |
+| §3.6 GPUs, quotas, regions | 22, 24 |
+| §3.7 Multi-GPU; §4 B15; Exercise 6 | 26–30 |
+| §3.8 MobileNetV2 transfer learning | 5 (the "Transfer Learning" bullet only) |
+| §2 costs, §5 code tour, §6 gotchas, §9 errata | none (tutorial-only) |
+
+**Lecture ideas you need for this tutorial**
+1. Set up experiment tracking at the start, together with the baseline models, not after a good model exists (slide 6).
+2. Tracking buys reproducibility and accountability: you can say what produced a result, good or bad, and repeat it (slide 8).
+3. A full record of a run has seven parts: environment, code, data, model, metrics, artifacts and notes (slide 9).
+4. Git, data versioning and lock files already cover code, data and environment. Weights, metrics and logs need a tracker, and tracking only works if it is automatic (slides 10–11).
+5. With Keras, adding W&B takes three edits: start a run, pass a callback to `model.fit`, finish the run (slides 14–15).
+6. Serverless training gives you hardware, a GPU if you ask for one, only for the training step, with no server to manage (slide 22).
+7. Getting from notebook to cloud takes three steps: move the code into a Python file whose choices arrive as arguments; package it and upload it to a bucket; create jobs from a CLI container, each job with its own hardware (slides 23–24).
+8. Choose the distribution strategy by hardware shape: One Device (one GPU), Mirrored (one machine with several GPUs), Multi Worker Mirrored (several machines) (slide 27).
+9. Going multi-GPU takes three edits: create the strategy, multiply the batch by the number of replicas, build and compile the model inside `strategy.scope()`. `fit` stays the same (slides 28–29).
+10. Multi-GPU reuses the bucket, the key and the package; only the launch script changes, to `cli-multi-gpu.sh` (slide 30).
+
+**Where the slides and today's tutorial differ** (in each case the repo, as verified here, is what runs today)
+- Slide 15's `callbacks=[WandbCallback()]` is gone from both repo trainers (removed with the Keras 3 move), so W&B shows no loss or accuracy curves until you add a callback (Exercise 1; §9 E1).
+- Slide 15 closes every run, but notebook B never calls `wandb.finish()`. Run it yourself after cell 52.
+- Slides 9, 10 and 13 count weights and model versions as tracked, but neither trainer saves the model or logs a W&B artifact (Exercise 4; §9 E6).
+- Slides 22 and 24 centre on GPUs, but the shipped `cli.sh` runs on CPU, with its GPU block commented out (§4 B13).
+- Slide 16's dashboard most likely shows an earlier mushroom-app project with TF-Hub runs. Your projects are `cheese-app-demo` (notebook B) and `cheese-training-vertex-ai` (repo).
+- Slide 23's `model=model_1`, `epochs=25`, `batch_size=32` are schematic. The real flags are `--model_name=mobilenetv2,--train_base,--epochs=2,--batch_size=32,--wandb_key=...` (`model-training/cli.sh:19`).
+- Slide 10 puts the environment in `pyproject.toml`/`uv.lock`. Here those two files pin only the console container; the trainer's environment is the image tag in `cli.sh` plus `setup.py` (§9 E8, E12).
+- Slide 21 labels Training "Training pipelines and jobs". A `sh cli.sh` job appears under Training → Custom jobs; only `cli.py` would create a training pipeline (§4 B16).
+- Slide 27 pairs one GPU with One Device Strategy. `task.py` creates a `MirroredStrategy` only to print the replica count, then trains outside any scope (§9 E11).
 
 ## Command checklist
 
