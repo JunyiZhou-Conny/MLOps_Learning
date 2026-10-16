@@ -5,12 +5,12 @@ Source: deck `L12_app_design` (58 slides), "Lecture 12: App Design", AC215/E115,
 ## 中文速览
 
 - **这一讲讲什么：** L12 没有 tutorial，也没有 video，只有一份 58 页的 slides（"Lecture 12: App Design"）。ML pipeline 做好以后，先 design、再 build：把 model 和 Python functions 变成 APIs，想清楚 user 需要什么，再设计 UI（slide 8）。AI app 除了 code 和 data 还有 models，LLM app 再加上 prompts 和 schemas，所以 design 分三步：Screenflow & Wireframes → Solution Architecture → Technical Architecture（14）。
-- **Idea 1 · Screenflow 先在纸上画：** 先在 whiteboard 或纸上 brainstorm，再画 wireframes：空的 chat → 上传一张 cheese 照片问 "What type of cheese is this?" → 回答 "Brie"。menu 里还有 About Us、Podcasts、Newsletters 三个 static pages（16–18）。L18 的 frontends 就有 chat、newsletters、podcasts 这几页。
-- **Idea 2 · Solution Architecture = Process / Execution / State：** Process 是 people 做什么，Execution 是完成它的 code，State 是整个 life cycle 里要 persist 的东西（20–21）。AI app 的 3×3 grid：Developers / Users / Data Scientists，Frontend / Backend / AI-ML Tasks，Source Control / Database / Data-Models（22–23）。每条 arrow 都标出 interaction 的类型：Human Interactions、CLI + Automation、HTTP/HTTPS、Protocol specific（28–32）。
+- **Idea 1 · Screenflow 先在纸上画：** 先在 whiteboard 或纸上 brainstorm，再画 wireframes：空的 chat → 上传一张 cheese 照片问 "What type of cheese is this?" → 回答 "Brie"。slide 18 再画 About Us、Podcasts、Newsletters 三页，header 和 hamburger menu 都一样（16–18）。L18 的 frontends 就有 chat、newsletters、podcasts 这几页。
+- **Idea 2 · Solution Architecture = Process / Execution / State：** Process 是 people 做什么，Execution 是完成它的 code，State 是整个 life cycle 里要 persist 的东西（20–21）。AI app 的 3×3 grid：Developers / Users / Data Scientists，Frontend / Backend / AI-ML Tasks，Source Control / Database / Data-Models（22–23）。arrow 上标出 interaction 的类型：Human Interactions、CLI + Automation、HTTP/HTTPS、Protocol specific（28–32；有几条 arrow 没有标，例如 Develop App → Source Control）。
 - **Idea 3 · backend 分三块：** API server 把 Python functions 暴露给 frontend；AI Engine 放 agents、harness、tools、skills 和 memory（就是 L06–L07 的内容）；Vector DB 负责 retrieval（32–33）。tutorials 里没有单独的 AI Engine container：L18 的 `api-service` 自己 call Gemini 和 Chroma（L10 的 v0 里甚至是 browser 直接 query Chroma）。
 - **Idea 4 · Technical Architecture 是 blueprint：** 从 people 往外画。developers 和 data scientists 用 IDE/CLI 和 browser，所有 development 都在 containers 里；data scientists 还用 Colab；users 只有 browser（36–38）。GCP 里有 GCS bucket、Artifact Registry、Agent Platform（tutorials 里叫 Vertex AI，跑 serverless 的 ML tasks，也提供 Gemini）、single compute instance 或 Kubernetes cluster，以及 persistent volume（39–47）。
-- **Idea 5 · 每条线都有 protocol 和 port：** developer 的线是 HTTPS 443，user 的线 slides 写 "HTTP/HTTPS 80"。cluster 里 NGINX 在最前面，后面是 Cheese App（3000）和 API Service（9000），API → AI Engine（9001）→ Vector DB（8000）（41–47）。注意 slide 47 的 arrowhead 指向发 request 的一方（例如 NGINX），port label 是箭尾那个 container listen 的 port，所以 request 的方向和箭头相反。L20 的 nginx 也这样分流：`/api-service/` → 9000，`/` → 3000。
-- **Idea 6 · 部署和代码组织：** 要活过 image update 的文件放 persistent volume（46, 50）；一台 compute instance 上每个 container 跑一份（L20），要 scale 就上 Kubernetes（L22）（43, 50）。同样 7 种 building blocks 在 GCP、AWS、Azure 都有，只是名字不同（53）。code 按 microservices 拆，一个 component 一个 `src/` folder，tests 放在 container 里，`secrets/` 放在 git root **旁边**，不放进 repo（55–56）。
+- **Idea 5 · 线上标着 protocol 和 port：** developer 的线是 HTTPS 443，user 的线 slides 写 "HTTP/HTTPS 80"。cluster 里 NGINX 在最前面，后面是 Cheese App（3000）和 API Service（9000），API → AI Engine（9001）→ Vector DB（8000）（41–47）。注意 slide 47 的 arrowhead 指向发 request 的一方（例如 NGINX），port label 是箭尾那个 container listen 的 port，所以 request 的方向和箭头相反。L20 的 nginx 也这样分流：`/api-service/` → 9000，`/` → 3000。
+- **Idea 6 · 部署和代码组织：** 要活过 image update 的文件放 persistent volume（46, 50）；一台 compute instance 上每个 container 跑一份（L20），要 scale 就上 Kubernetes（L22）（43, 50）。同样 7 种 building blocks 在 GCP、AWS、Azure 都有，只是名字不同（53）。code 按 microservices 拆，`src/` 下面一个 component 一个 folder，tests 放在 container 里，`secrets/` 放在 git root **旁边**，不放进 repo（55–56）。
 - **和 tutorials 不一样的地方：** slides 写 "Agent Platform"，tutorial 的 README 写 Vertex AI；slide 6 写 pipenv，现在的 tutorials 大多用 `uv`；"NFS" persistent volume 在 L20 其实是一块 50 GB 的 block disk；没有 tutorial 用 Streamlit；user 那条线要到 L23（`setupSSL` 的 Google load balancer）才真的是 HTTPS。每个 idea 在哪个 guide 的哪一节用到，见文末的 [Where this shows up in the tutorials](#where-this-shows-up-in-the-tutorials)。
 
 ## Outline
@@ -20,7 +20,7 @@ Source: deck `L12_app_design` (58 slides), "Lecture 12: App Design", AC215/E115,
 - Slides 3–6 · **1. Recap**. The Cheese App idea: identify a cheese from a photo, then chat about it (4). The five ingredients of building an app (5). The course's development-to-deployment picture (6).
 - Slides 7–12 · **2. Motivation**. What has to happen before you build the app (8). Reviews of the project's problem definition (9), proposed solution (10), scope from POC through Prototype to MVP (11), and where the project stands on the timeline (12).
 - Slides 13–14 · **3. App Design**. What an AI app has that a traditional app lacks, and the three design artefacts (14).
-- Slides 15–18 · **4. Screenflow & Wireframes**. Start on a whiteboard or paper (16). The chat screenflow (17). Static pages: About Us, Podcasts, Newsletters (18).
+- Slides 15–18 · **4. Screenflow & Wireframes**. Start on a whiteboard or paper (16). The chat screenflow (17). Three more pages: About Us, Podcasts, Newsletters (18).
 - Slides 19–33 · **5. Solution Architecture**. Definition (20). The three layers Process, Execution and State with examples (21). A role-by-layer grid for an AI app (22), filled in for the cheese app (23). A nine-step build-up of the cheese app's solution diagram (24–32). Summary (33).
 - Slides 34–53 · **6. Technical Architecture**. Definition (35). An eleven-step build-up on GCP (36–46). The finished diagram (47). The "App is ready!" joke (48–49). Summaries of the blocks on GCP (50), AWS (51) and Azure (52). Comparison table of the three clouds (53).
 - Slides 54–56 · **7. Setup & Code Organization**. Principles: microservices, tests and secrets (55). The repository folder layout (56).
@@ -32,15 +32,15 @@ Source: deck `L12_app_design` (58 slides), "Lecture 12: App Design", AC215/E115,
 1. **Design before you build.** Once the ML pipeline exists, the next job is an app that uses its components. Expose the model and Python functions as APIs, work out which user needs those APIs can meet, and design the user interface. The slide ends with the question of how to do this. (Slide 8)
 2. **An AI app has more moving parts than a traditional app.** A traditional app has code and data. An AI app adds models that perform tasks, and an LLM app adds prompts and schemas. That is why the lecture uses a structured design method. (Slide 14)
 3. **Three design artefacts.** The design consists of Screenflow & Wireframes, a Solution Architecture and a Technical Architecture, in that order. The lecture is organised around these three. (Slides 14, 15, 19, 34)
-4. **Screenflow first, on paper.** Start by brainstorming on a whiteboard or paper. Then draw wireframes that show the core interaction screen by screen: an empty chat, then a photo with "What type of cheese is this?", then the answer "Brie". Add the static pages reachable from the menu (About Us, Podcasts, Newsletters). (Slides 16–18)
+4. **Screenflow first, on paper.** Start by brainstorming on a whiteboard or paper. Then draw wireframes that show the core interaction screen by screen: an empty chat, then a photo with "What type of cheese is this?", then the answer "Brie". Add the other pages (About Us, Podcasts, Newsletters), drawn with the same header and hamburger menu. (Slides 16–18)
 5. **The solution architecture names the building blocks.** Start from the problem statement and ask how the app addresses it. Then identify three things: the Process (what people do), the Execution blocks (the code that fulfils the process) and the State (what must persist over the app's life cycle). (Slides 20–21)
 6. **The role-by-layer grid.** For an AI app, the people are Developers, Users and Data Scientists. The code is Frontend, Backend and AI/ML Tasks. The state is Source Control, Database and Data/Models. The cheese app fills each band with concrete tasks: scraping images, EDA, training CNN/LLM models, users uploading images and chatting, applying the training-time preprocessing at prediction time, RAG for Q/A, and saving images, weights, text chunks and embeddings. (Slides 22–23)
-7. **Every arrow says what kind of interaction it is.** In the cheese app's solution diagram there are three human activities (Develop App, AI/ML Tasks, Upload picture and view predictions). They reach code in three ways: by human interaction (notebooks, the frontend), by CLI and automation (the ML pipeline), and by a long link straight to source control (development). Code reaches LLMs over HTTP/HTTPS and reaches state through protocol-specific connections. (Slides 24–32)
+7. **The arrows say what kind of interaction they are.** In the cheese app's solution diagram there are three human activities (Develop App, AI/ML Tasks, Upload picture and view predictions). They reach code in three ways: by human interaction (notebooks, the frontend), by CLI and automation (the ML pipeline), and by a long link straight to source control (development). Code reaches LLMs over HTTP/HTTPS and reaches state through protocol-specific connections. A few arrows carry no label, such as Develop App → Source Control and Notebooks → State. (Slides 24–32)
 8. **The backend has three parts.** An API server exposes Python functions to the frontend. An AI Engine holds the agents, harness, tools, skills and memory. A Vector DB serves retrieval. The frontend is a single-page app for uploading and chatting. (Slides 32–33)
 9. **A technical architecture is the system's blueprint.** It gives a high-level view from development to deployment. It shows which components or containers talk to which, so the team sees the big picture and new members can onboard. (Slide 35)
 10. **Build the technical diagram from the people outward.** Developers and data scientists work through an IDE/CLI and a browser, and all their development is containerized. Data scientists also use Colab or JupyterHub notebooks and access LLMs. Users only have a browser, where they upload images, see predictions and chat. (Slides 36–38)
 11. **On GCP the blueprint has these parts.** GitHub and Colab sit outside the GCP boundary. Inside GCP are a GCS bucket for data and models, Google Artifact Registry for every container image, the Agent Platform running the ML pipeline steps serverlessly next to Gemini, a single compute instance or Kubernetes cluster that runs the app's containers, and a GCE persistent volume. (Slides 39–47, 50)
-12. **Every link carries a protocol and a port.** Developer tools use HTTPS 443 and users reach the app on "HTTP/HTTPS 80". Inside the app host, NGINX sits in front of the Cheese App container (3000) and the API Service container (9000). The API Service talks to the AI Engine (9001), the AI Engine to the Vector DB (8000), and the host reaches the persistent disk over NFS. (Slides 41–47)
+12. **The links carry a protocol and a port.** Developer tools use HTTPS 443 and users reach the app on "HTTP/HTTPS 80". Inside the app host, NGINX sits in front of the Cheese App container (3000) and the API Service container (9000). The API Service talks to the AI Engine (9001), the AI Engine to the Vector DB (8000), and the host reaches the persistent disk over NFS (a protocol with no port). The push arrows to GitHub and to Artifact Registry carry no label. (Slides 41–47)
 13. **Images flow from laptop to registry to cloud.** Developers push the images from their containers to Artifact Registry. Both the serverless ML tasks and the app host pull from there over HTTPS 443. (Slides 44–47)
 14. **Persist what must outlive an image update.** The persistent volume holds every file that has to survive when the container images are replaced. (Slides 46, 50)
 15. **One machine first, a cluster to scale.** A single compute instance can host one copy of every container. A Kubernetes cluster (GKE) is what scales the app. (Slides 43, 50)
@@ -55,7 +55,7 @@ Source: deck `L12_app_design` (58 slides), "Lecture 12: App Design", AC215/E115,
 **Slide 4 · Cheese App screen (illustration).** A phone-style screen titled "Cheese App" shows a sketched wedge and wheel of cheese, captioned "Type: Brie (93.54%)". This sets the scene and teaches no mechanism.
 
 **Slide 6 · Development → Deployment (recap).**
-- *Layout:* A red "Development" brace spans three stages from left to right, joined by coloured arrows (purple, orange, green):
+- *Layout:* A red "Development" brace spans three stages from left to right, joined by a purple and an orange arrow; a green arrow leads from the third stage on to Deployment:
   1. A grid of scraped cheese photos with a "Python Script" box.
   2. A notebook table screenshot with a "Colab" box.
   3. "Rest API" and "Best Model" boxes beside a sketch of the Cheese App screen, above an "IDE / Code Editor" box.
@@ -64,7 +64,7 @@ Source: deck `L12_app_design` (58 slides), "Lecture 12: App Design", AC215/E115,
   - Stage 2: the Colab-provided Python on Linux.
   - Stage 3: pipenv on Mac/Windows.
 - *People:* Person icons appear under each stage, captioned "Multiple developers, Using Mac and Windows OS".
-- *Deployment:* A green "Deployment" brace, labelled "Server" (pipenv, Linux), holds three items stacked from top to bottom: the live Cheese App window with a cheese photo and its prediction, a red "Model Training" box, and the image grid with a "Python Script" box.
+- *Deployment:* A green "Deployment" brace above and a blue "Server" brace below (with the note pipenv, Linux) frame three items stacked from top to bottom: the live Cheese App window with a cheese photo and its prediction, a red "Model Training" box, and the image grid with a "Python Script" box.
 - *The loop:* Grey arrows run from the app down to Model Training and to the script, a purple arrow runs from the script up to Model Training, and a red arrow runs from Model Training back up to the app.
 - *Purpose:* To show the problem: many people, many environments, and a deployment that is a continuous retraining loop rather than a one-off.
 
@@ -80,7 +80,7 @@ Source: deck `L12_app_design` (58 slides), "Lecture 12: App Design", AC215/E115,
   - "Build Baseline Models" (across the POC/Prototype line)
   - "Build Better Models" and "ML Workflow" (Prototype)
   - "Build Cheese App" (MVP)
-  - "Deployment, Scaling & Automation" (from late Prototype to the end of MVP)
+  - "Deployment, Scaling & Automation" (from the middle of Prototype to the end of MVP)
 - *Highlight:* A red dashed box marks the top bar, "Design Cheese App", which spans POC and Prototype.
 - *Purpose:* To show where this lecture sits: design happens early and overlaps model work.
 
@@ -91,12 +91,12 @@ Source: deck `L12_app_design` (58 slides), "Lecture 12: App Design", AC215/E115,
 
 Purpose: to show how one interaction (photo in, label out, in a chat) moves across screens.
 
-**Slide 18 · Static page wireframes.** Three side-by-side screens, all with the same "Cheese App" header and hamburger menu, and no arrows between them:
+**Slide 18 · Wireframes of three more pages.** Three side-by-side screens, all with the same "Cheese App" header and hamburger menu, and no arrows between them:
 - "About Us": a welcome paragraph about Formaggio.me.
 - "Podcasts": an intro, then an episode card "Episode 1 Halloumi [EN]" with a play button.
 - "Newsletters": an intro, then an article card "Exploring Alpine Cheeses".
 
-Purpose: the secondary pages, reached from the menu.
+Purpose: the secondary pages. The slide draws no navigation; the shared hamburger menu suggests they are reached from it.
 
 **Slide 21 · The three layers.**
 - *Layout:* Three horizontal bands separated by rules, labelled on the left "Process (People)" in red, "Execution (Code)" in blue and "State (Source, Data, Models)" in green. Each band has a dotted box of examples:
@@ -106,7 +106,7 @@ Purpose: the secondary pages, reached from the menu.
 - *Purpose:* The vocabulary for sorting any component into a layer.
 
 **Slide 22 · Grid for an "AI App".**
-- *Layout:* A 3×3 grid of empty coloured cells under the three band labels:
+- *Layout:* A 3×3 grid of empty coloured cells, one row beside each band label, with a small label above each cell:
 
   | Band | Column 1 | Column 2 | Column 3 |
   |---|---|---|---|
@@ -118,7 +118,7 @@ Purpose: the secondary pages, reached from the menu.
 
 **Slide 23 · Grid filled in for the cheese app.** Three yellow sticky notes lie over the grid:
 - *Red, over the Process cells:* scrape images, EDA, data processing, train CNN/LLM models, build the frontend, and the users' upload, chat and newsletter/podcast viewing.
-- *Blue, over Backend and AI/ML:* apply the same preprocessing to an incoming image, predict with the best model, call an LLM for chat, RAG for Q/A, and generate and show newsletters and podcasts.
+- *Blue, over the AI/ML Tasks column:* apply the same preprocessing to an incoming image, predict with the best model, call an LLM for chat, RAG for Q/A, and generate and show newsletters and podcasts.
 - *Green, over State:* store images centrally, model weights, text chunks, embeddings and preprocessing information, plus a source repository for collaboration.
 
 **Slides 24–32 · Building the cheese app's solution architecture (one diagram, built up step by step).**
@@ -130,7 +130,7 @@ Purpose: the secondary pages, reached from the menu.
   - 27: A tall double arrow runs from Develop App straight through Execution down to Source Control.
   - 28: A down arrow labelled "(Human Interactions)" runs from AI/ML Tasks into a yellow "Interactive Notebooks" group that holds "Notebooks". A double arrow joins Notebooks to State, and another double arrow, labelled "(Protocol specific)", joins the whole Execution panel to State.
   - 29: A second down arrow from AI/ML Tasks, labelled "(CLI + Automation)", leads into a blue "ML Pipeline" group with a 2×2 of boxes: Data Collector, Data Processor, Model Training, Model Deploy.
-  - 30: A green "LLMs" group with "Frontier LLMs" and "Fine tuned LLMs" appears. Double arrows labelled "(HTTP / HTTPS)" join it to Notebooks and to the ML Pipeline.
+  - 30: A green "LLMs" group with "Frontier LLMs" and "Fine tuned LLMs" appears. Two double arrows join it to Notebooks and to the ML Pipeline; one "(HTTP / HTTPS)" label sits between them.
   - 31: A down arrow labelled "(Human Interactions)" runs from "Upload picture, view predictions" into a teal "Frontend" group holding "Cheese App".
   - 32: A purple "Backend" group holds "API", "AI Engine" and "Vector DB". A double arrow labelled "(HTTP / HTTPS)" joins Frontend and Backend, and a horizontal double arrow labelled "(HTTPS)" joins LLMs and Backend.
 - *Purpose:* To show how each human activity enters the system, which code serves it, and how code reaches models and stored state. The arrow labels classify the interfaces.
@@ -187,7 +187,7 @@ Purpose: the secondary pages, reached from the menu.
 | Human Interactions / CLI + Automation / Protocol specific | 28–32 | Labels for the kind of interface on an arrow. |
 | Interactive Notebooks | 28, 33 | Hosted web notebooks for experiments (Colab, JupyterHub). |
 | Frontier LLMs / Fine tuned LLMs | 30, 33 | Hosted model APIs and fine-tuned versions of them (L08). |
-| AI Engine | 32–33, 47 | The backend part that holds agents, harness, tools, skills and memory, drawn as its own container on HTTP 9001. The tutorial cheese apps have no separate AI-engine container: `api-service` itself calls Gemini and Chroma (L10, L18 guides). |
+| AI Engine | 32–33, 47 | The backend part that holds agents, harness, tools, skills and memory, drawn as its own container on HTTP 9001. The tutorial cheese apps have no separate AI-engine container: `api-service` itself calls Gemini (L10, L18 guides) and, in L18, Chroma; in L10 the browser queries Chroma itself. |
 | Knowledge Base / Vector DB | 21, 26, 32, 47 | The retrieval store. The tutorials use ChromaDB (`vector-db`, port 8000). |
 | Technical Architecture | 35, 47 | The deployment-level "Blueprint" of components and containers. The build-up slides 36–46 are titled "Building a Technical Architecture". |
 | Agent Platform | 39–50, 53 | GCP's AI/ML platform, which runs the "Serverless ML Tasks" and hosts the LLMs ("Gemini, Claude"). The tutorial READMEs say **Vertex AI** (L13 custom jobs, L15 "Vertex AI Pipelines"). The IAM role now shows as "Agent Platform User" (L04 and L05 guides). The table calls the LLM row "Agent Platform LLMs". |
@@ -196,7 +196,7 @@ Purpose: the secondary pages, reached from the menu.
 | Single Compute Instance/ Kubernetes Cluster | 43–47, 50 | Where the app's containers run: one VM ("Compute Instance") or GKE. In the tutorials: one VM in L20, GKE in L22. |
 | NGINX Container | 47 | The reverse proxy in front of the app. L20's `nginx.conf` sends `/api-service/` to `api-service:9000` and `/` to `frontend:3000`, which matches the slide's ports. |
 | API Service Container / Cheese App Container / Vector DB Container | 47 | The tutorial folders are `api-service`, `frontend-react` and `vector-db`. |
-| GCE Persistent Volume / Persistent Disk (NFS) | 46, 50 | Files that must survive image updates. In the tutorials this is the api-service's `/persistent` mount (`persistent-folder` on the L20 VM, PVCs in L22). The slide's "NFS" label has no counterpart in those guides. |
+| GCE Persistent Volume / Persistent Disk (NFS) | 46, 50 | Files that must survive image updates. In the tutorials this is the api-service's `/persistent` mount (`persistent-folder` in L20's manual route, a 50 GB data disk at `/mnt/disk-1` in its Pulumi route, PVCs in L22). The slide's "NFS" label has no counterpart in those guides. |
 | Microservices vs monolithic | 55 | One service per design component. |
 | Github root / Secrets (outside git folder) | 56 | The repository root, and a key folder kept beside it. The tutorials do the same: `secrets/` next to the clone, mounted at `/secrets` (L03, L04, L10 guides). |
 | Formaggio.me | 5, 18 | The name of the cheese app and its live site. |
@@ -213,10 +213,10 @@ Purpose: the secondary pages, reached from the menu.
 | Virtual Machines | Compute Instance | EC2 Instance | Azure Virtual Machine |
 | Kubernetes Service | Google Kubernetes Engine | Elastic Kubernetes Service | Azure Kubernetes Service |
 
-The per-cloud summaries (50–52) use the short forms GKE, EKS and AKS, plus "Amazon Elastic Block Store", "EC2 Instance" and "Azure Virtual Machines".
+The per-cloud summaries (50–52) use the short forms GKE, EKS and AKS, plus "Amazon Elastic Block Store", "Amazon Bedrock LLMs", "Azure Container Registry (ACR)" and "Azure Virtual Machines".
 
 **Other differences from the tutorials.**
-- **Python tooling.** Slide 6 labels every environment "pipenv". Most current tutorials use `uv`, although `cheese-app-v0/api-service` still uses pipenv (L10 guide).
+- **Python tooling.** Slide 6 labels the laptop and server environments "pipenv" (the Colab stage is "Colab provided env"). Most current tutorials use `uv`, although `cheese-app-v0/api-service` still uses pipenv (L10 guide).
 - **Port 80.** Slides 41–47 label the user link "HTTP/HTTPS 80". Port 80 is plain HTTP, and HTTPS normally uses 443. The deployed cheese app in L20 and L22 is served over plain HTTP on port 80.
 - **Streamlit.** Slide 11 pairs the Prototype phase with Streamlit. None of the tutorial repositories covered by our guides uses Streamlit.
 
@@ -256,10 +256,10 @@ Compared with the repositories:
 - **Plan before coding.** Build the ML pipeline, then decide which APIs the app needs from user needs, then design the UI. The open question "How do we do this?" is in red. (Slide 8)
 - **Start low-tech.** Brainstorm on a whiteboard or paper before drawing wireframes. (Slide 16)
 - **Anchor the architecture in the problem statement.** Ask how the app addresses the problem before listing components. (Slide 20)
-- **Separate people, code and state.** Every component belongs to one layer, and every interface is labelled with its kind. (Slides 21, 28–32)
+- **Separate people, code and state.** Every component belongs to one layer, and the interfaces are labelled with their kind. (Slides 21, 28–32)
 - **Preprocessing must match.** Apply to an incoming image the same preprocessing that was used in training, and store the preprocessing information as state. (Slide 23)
 - **All development is containerized,** for developers and data scientists alike. (Slide 38)
-- **Label every connection with a protocol and a port.** (Slides 41–47)
+- **Label the network links with a protocol and a port.** (Slides 41–47)
 - **Keep persisted files outside images.** Anything that must survive an image update goes on a persistent volume. (Slides 46, 50)
 - **Trade-off: single instance or cluster.** One compute instance hosts one copy of every container; Kubernetes is used to scale. (Slides 43, 50)
 - **Think in building blocks, not vendors.** The same design maps onto GCP, AWS or Azure. (Slides 50–53)
@@ -299,13 +299,13 @@ L12 has no tutorial and no video of its own. Its two architecture diagrams are s
 | 4 | Screenflow and wireframes (16–18) | [L18] §3.7 and §4 B6–B9: the simple and React frontends, with chat, newsletter and podcast pages. Its `llm-cnn` chat is slide 17's flow: send a photo, get the cheese back. [L10] At a glance: v0's chatbot frontend. |
 | 5 | Process, Execution and State (20–21) | Each State example on slide 21 has a tutorial: source control [L09] §3.5, [L21] §3.1; artifact registry [L14] §3.6; data store [L03] §3.1, [L11] §3.2; model registry [L15] §3.2; knowledge base [L05] §3.4. So do the Execution examples: notebooks [L13], ML tasks [L15] §3.5, LLM APIs [L10] §3.8, agents and tools [L06] §3.2. |
 | 6 | The role-by-layer grid, filled in (22–23) | Scrape and process images: `ml-workflow`'s data-collector and data-processor, [L15] §1 Part B. EDA and training: [L13] (Colab; MobileNetV2, §3.8). A fine-tuned LLM: [L08] §3.4. Upload and chat: [L18] (the `llm-cnn` and `llm-rag` routers). The same preprocessing at prediction time: [L15] §3.1 puts it inside the model's serving signature. RAG: [L05] §3.1. Stored images, weights, chunks and embeddings: [L11] §3.7, [L13] At a glance (models in a bucket), [L05] §3.4. |
-| 7 | Every arrow names its kind of interaction (24–32) | Human interaction: notebooks in [L13], the browser in [L18] §3.5. CLI + automation: [L15] §3.7 (a CLI container submits the pipeline), [L23] §3.2 (a commit message starts it). Develop → source control: [L09] §3.5, [L21] §3.1. Code → LLM over HTTPS: [L10] §3.2 (a bearer token on every request). Protocol-specific links to state: [L11] §3.7 (gcsfuse), [L05] §3.4 (the CLI reaches the Chroma server by name), [L03] §3.1 (the GCS client). |
+| 7 | The arrows name their kind of interaction (24–32) | Human interaction: notebooks in [L13], the browser in [L18] §3.5. CLI + automation: [L15] §3.7 (a CLI container submits the pipeline), [L23] §3.2 (a commit message starts it). Develop → source control: [L09] §3.5, [L21] §3.1. Code → LLM over HTTPS: [L10] §3.2 (a bearer token on every request). Protocol-specific links to state: [L11] §3.7 (gcsfuse), [L05] §3.8 (the CLI reaches the Chroma server by name), [L03] §3.6 (the GCS client, `storage.Client()`). |
 | 8 | Backend = API + AI Engine + Vector DB; frontend = a single-page app (32–33) | API: [L18] §3.1–3.3. What the AI Engine holds: the agent loop [L06] §3.3; harness, memory and skills [L07] §3.2, §3.5, §3.6. Vector DB: [L05] §3.4, [L18] §4 B1. Single-page app: [L18] §3.7 (Next.js). No tutorial runs a separate AI Engine container. In L18 `api-service` calls Gemini and reaches Chroma by container name ([L18] §3.5), its agent route is a stub (L18 slide notes), and in L10's v0 the browser queries Chroma directly ([L10] §3.6). |
 | 9 | The technical architecture is the blueprint (35) | Every deployment guide opens with one: [L18] §1 (APIs 19 draws NGINX and the ports 3000, 9000, 8000), [L20] §1 (L20's slide 7), [L22] §1, [L23] §3.7 (v4's `images/ci-cd.png`). |
 | 10 | Draw from the people outward; all development is containerized (36–38) | Containerized development: [L02]–[L04] (L04 C1–C2: build or pull the image, driven by one wrapper script); [L23] §3.3 (the same toolbox container on a laptop and on a CI runner). Data scientists in notebooks: [L06], [L08] Track B, [L13]. Users have only a browser: [L18] §3.5. |
 | 11 | The GCP blueprint's parts (39–47, 50) | See the box-by-box table below. |
-| 12 | Every link has a protocol and a port (41–47) | Ports in general: [L04] C7, [L10] §3.5, [L18] §3.3 (`0.0.0.0`). NGINX → 3000 and 9000: [L20] §3.8 (`/api-service/` → `api-service:9000`, `/` → `frontend:3000`), and [L22] §3.4, where the Ingress routes the same way. Vector DB on 8000: [L05], [L18] §1. Port 9001: no tutorial. HTTPS for users: only [L23] §3.8 (a Google-managed certificate); L20 and L22 serve plain HTTP on port 80. |
-| 13 | Images flow from laptop to registry to cloud (44–47) | [L02] §3.1 (push to Docker Hub) and §3.7 (an Apple Silicon image will not run on an amd64 VM); [L14] §3.6 (Docker Hub vs Artifact Registry); [L20] §3.5 (timestamp-tagged images in Artifact Registry); [L23] §3.4 (a new tag rolls the Deployments). Exception: L15's pipeline pulls public Docker Hub images ([L15] slide notes). |
+| 12 | The links carry a protocol and a port (41–47) | Ports in general: [L04] C7, [L10] §3.5, [L18] §3.3 (`0.0.0.0`). NGINX → 3000 and 9000: [L20] §3.8 (`/api-service/` → `api-service:9000`, `/` → `frontend:3000`), and [L22] §3.4, where the Ingress routes the same way. Vector DB on 8000: [L05], [L18] §1. Port 9001: no tutorial. HTTPS for users: only [L23] §3.8 (a Google-managed certificate); L20 and L22 serve plain HTTP on port 80. |
+| 13 | Images flow from laptop to registry to cloud (44–47) | [L02] §4 Part B (push to Docker Hub) and §3.7 (an Apple Silicon image will not run on an amd64 VM); [L14] §3.6 (Docker Hub vs Artifact Registry); [L20] §3.5 (timestamp-tagged images in Artifact Registry); [L23] §3.4 (a new tag rolls the Deployments). Exception: L15's pipeline pulls public Docker Hub images ([L15] slide notes). |
 | 14 | Persist what must outlive an image update (46, 50) | [L03] §3.4 (image vs container vs bind mount), [L10] §3.7, [L18] §3.6 (chat history under `/persistent`), [L20] §4 B10 (a data disk at `/mnt/disk-1`), [L22] §3.5 (PVC → PV → disk). |
 | 15 | One machine first, a cluster to scale (43, 50) | [L20] (one VM running five containers), then [L22] §3.1 and §3.6 (node pools, replicas, autoscaling). L22 slide notes, idea 1: why one VM is a single point of failure. |
 | 16 | The building blocks are cloud-agnostic (50–53) | Not applied: every tutorial runs on GCP. L18's APIs deck repeats the comparison (APIs 22, not needed for the tutorial). Some repos have AWS variants (`simple-translate-aws`, `mega-pipeline-aws`, `model-deployment-aws`, `ml-workflow-aws`), but the guides do not cover them ([L02], [L03], [L15] At a glance). |
@@ -340,7 +340,7 @@ L12 has no tutorial and no video of its own. Its two architecture diagrams are s
 1. What has to be decided before you build an app on top of an ML pipeline, and in which order? (8)
 2. What does an AI app have that a traditional app does not, and what does an LLM app add? (14)
 3. Which three artefacts make up an app design, and what question does each one answer? (14, 16–17, 20, 35)
-4. Sketch the cheese app's screenflow. Which three screens show one photo-to-answer interaction, and which pages hang off the menu? (17–18)
+4. Sketch the cheese app's screenflow. Which three screens show one photo-to-answer interaction, and which other pages does slide 18 add? (17–18)
 5. Name the three layers of a solution architecture. In which layer do these belong: a data scientist training a CNN, the API, the embeddings, the GitHub repository? (21–23)
 6. Why must the app apply the training-time preprocessing to an uploaded image, and what has to be stored so that it can? (23) Compare your answer with L15 §3.1.
 7. For each human activity on slide 31, how does it reach the code (human interaction, CLI + automation, or straight to source control)? How does the code reach the LLMs and the stored state? (27–32)

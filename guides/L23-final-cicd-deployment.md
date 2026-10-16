@@ -87,18 +87,18 @@ The instructor's deck for this lecture is *Lecture 23: Final Deployment and Revi
 | Checklist "Continuous Integration and Continuous Deployment (CI/CD)"; §3.1 | 7–12, 36 (the CI/CD loop; CI defined; delivery vs deployment) |
 | §3.2 The trigger; checklist "Frontend & Backend Changes"; §4 D4; §6 #1 | 18, 20 |
 | §3.3 The toolbox container; §4 B1, D5; §8 E6 | 17–18; 35 (in development, the source code is mounted into the containers) |
-| §3.4 Timestamp tags and the rolling update; §4 D6 | 18 (build and push images for release, then deploy them to the cluster); 19, 36 (Build, Release, Deploy) |
+| §3.4 Timestamp tags and the rolling update; §4 D6 | 18 (build and push images for release, then deploy them to the cluster); 19 (Build → Deploy); 36 (Release before Deploy) |
 | §3.7 Two loops, one map | 19; 5–6 (the five operations to automate) |
 | §3.8 The load balancer; §4 B4 | 37 (L22's NGINX routing) |
 | Checklist "ML Component Changes"; §4 Part E | 5–6; 13–15 (CI and CD for ML); 17–18; 32–34 (training jobs, model deployment, the four-step pipeline) |
 | §2 Costs; §4 Part F | 15 (cost as a challenge of CD for ML) |
-| §7 Where this sits in the course; §8 E7 (MS5) | 21–37 (the review); 8–12, 36 (the missing CI half, and what continuous deployment adds); 13–15 (validation and retraining) |
+| §7 Where this sits in the course; §8 E7 (MS5) | 21–37 (the review); 8–12, 36 (the missing CI half, and what continuous deployment adds); 13–15 (validating a model before release, data drift) |
 | §3.5 Shared state, §3.6 Identity, §5 Code tour, §6 (except #1), §9 Errata | none (tutorial-only) |
-| Background, not needed to finish the tutorial | 4 (a joke turkey-timer prediction app as motivation); 16 (six CI/CD services); 22–31 (the review of environments and containers, the audio pipeline, labeling, ChatGPT's training, RAG, agents, LoRA, distillation) |
+| Background, not needed to finish the tutorial | 4 (a joke turkey-timer prediction app as motivation); 16 (six CI/CD services); 22–31 (the review of environments and containers, the audio pipeline, the team Docker workflow, app design, labeling, ChatGPT's training, RAG, agents, LoRA, distillation) |
 
 **Lecture ideas you need for this tutorial**
 1. Automate five operations: data pipeline jobs, model training and deployment, frontend deployment, backend deployment, and building and pushing images (5–6). v4 automates all of them except building the two ML step images (§6 #3), and it deploys frontend and backend only together.
-2. CI/CD is one loop: commits → build → test → (release →) deploy → monitor, with every stage notifying the developers (7, 36). v4 wires the deploy half; the run's colour is its only notification, and it can be green when the image build failed (§6 #4).
+2. CI/CD is one loop: commits → build → test → (release →) deploy → monitor, with every stage after the codebase notifying the developers (7, 36). v4 builds, releases and deploys but runs no tests; the run's colour is its only notification, and it can be green when the image build failed (§6 #4).
 3. CI runs scripts on every push: automated tests, coding standards (style and consistency) and static analysis (defects and vulnerabilities, found without running the code) (8–10). None of them run here; L21's `ci.yml` is that half.
 4. Delivery vs deployment is whether a person presses release (11–12). Typing `/deploy-app` is that person; deploying on every merge to `main`, behind tests, is continuous deployment (MS5, §8 E7).
 5. CI/CD for ML integrates code, data and models; it should catch data-quality, code and model-performance problems, balance frequent runs against training cost, and release a model only when its metrics stay within tolerance, watching for data drift (13–15). v4's ML lane checks no metric before it deploys (§3.7).

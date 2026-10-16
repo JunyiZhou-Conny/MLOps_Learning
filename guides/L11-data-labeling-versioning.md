@@ -13,6 +13,7 @@
 - **最费时间的坑：** ① README 让你 clone 的 starter branch `data-versioning-ac215` 在 `Dockerfile:36` 还在装已经下架的 `google-cloud-sdk`，2026 年 10 月 image build 一定失败；build 之前改成 `google-cloud-cli`（`main` 已经改了）。② README 从来没让你先往 `images/` 放图片：`images/` 是空的，或者图片是用 CLI 上传的、没有 folder placeholder object（gcsfuse 没开 `--implicit-dirs`），`cheese_dataset` 就是空的，甚至 bind mount 直接失败。entrypoint 没有 `set -e`，照样给你一个 shell，所以 `dvc add` 之前一定先 `ls cheese_dataset`。
 - **其他要改、要知道的：** 两个 repo 都找 `../secrets/data-service-account.json`（repo 旁边的 `secrets/`；Part A 的 repo folder 必须叫 `data-labeling`）；bucket 名要改 `data-labeling/docker-shell-CLI.sh:23`（用 compose 还要改 `docker-compose.yml:17`）和 `data-versioning/docker-shell.sh:7`。`cli.py -p/-t` 报 `401` 多半是复制了 JWT Personal Access Token（`eyJ` 开头），legacy `Client` 只认 legacy token。Colab 默认用 class repo，它的 DVC remote 是 class bucket，你多半没有读权限：换成你自己的 repo URL 和 tag（private repo 要带 token）。lecture 标题里的 "Monitoring" 没有对应的 tutorial。
 - **做完要删：** `docker stop data-label-studio` 再 `docker rm data-label-studio`，`docker network rm data-labeling-network`，可选在 CLI container 里 `python cli.py -r` 去掉 CORS；不再用的 service-account key 在 IAM 里删掉。bucket 每月不到一美分；**只要还想要这些 dataset versions，就别删 `dvc_store/`**，删了 GitHub 上每个 `dataset_v*` tag 都会失效。
+- **Lecture slides：** 老师的 Lecture 11 slides（41 页）和这份 guide 各节怎么对应、做 tutorial 需要的 10 个 lecture ideas，以及 slides 和今天 repo 不一样的 10 处，都在下面的 [Lecture slides](#lecture-slides)。最要紧的两处：① slide 6（就是 README 顶上那张图）画的是 labeled 照片按 cheese 分好类、直接进 Colab training；实际上 Label Studio 只写 JSON annotation，L11 的 Colab 只用 `dvc get` 取版本、不 train，DVC version 的是另一个 bucket 里没有 label 的 `images/`。② slides 32–33 说 mount 以后不用 local copy、DVC 的读写都走 bucket；实际上 `dvc add` 会把每张图复制进 host 上的 `.dvc/cache/`，`dvc push` 走 Storage API 传到 `dvc_store/`。lecture 标题里的 Monitoring 在 slides 38–40 只有概念，没有 tutorial。
 
 ## At a glance
 
@@ -61,6 +62,54 @@
 - **How to read the references.** `data-labeling/<file>:N` is `main` @ `03c3e27`. `data-versioning/<file>:N` is `main` @ `b240b1a`. `data-versioning@data-versioning-ac215/<file>:N` is the starter branch @ `23762e4`. `label_studio_sdk/…` paths are in `label-studio-sdk` 2.0.12 (as locked in `data-labeling/uv.lock:466-467`); `dvc/…` and `dvc_data/…` paths are in DVC 3.63.0. A bare `:N` continues the file named just before it.
 
 </details>
+
+## Lecture slides
+
+The instructor's deck for this lecture is *Lecture 11: Data Labeling, Versioning and Monitoring*, 41 slides. Slide numbers are PDF page numbers. The slides are not reproduced here; what follows is in our own words. The full slide digest and the cross-check with the video live in the Explainer_Videos repo, in `videos/ac215-l11-data-labeling-versioning/SLIDES.md`. One README image is a lecture diagram: `data-labeling-flow.png`, the figure at the top of the data-labeling README, is slide 6. The deck also answers the monitoring question in §9: slides 38–40 cover data monitoring as concepts only, with no tutorial or demo.
+
+**Map**
+
+| This guide | Slides |
+|---|---|
+| At a glance; §1 Part A diagram | 5–6, 13–14 |
+| §1 Part B diagram | 26, 29–32 |
+| Checklist *Part A*; §4 A1–A15 | 13–14 (the setup), 8–12 (network → A6 and A10, credentials → A2, Compose → A14) |
+| Checklist *Part B* and *Colab*; §4 B1–B15 | 26–34 |
+| §3.1 Tasks and annotations | 4, 6 |
+| §3.2 Signed URLs | 7 (the privacy claim only; the mechanism is tutorial-only) |
+| §3.3 CORS | none (tutorial-only) |
+| §3.4 Two addresses | 10, 13 |
+| §3.5 Content addressing | 20 (Efficiency), 23, 25 |
+| §3.6 Pointer, remote, tags | 22 (time travel), 23, 25, 36 |
+| §3.7 gcsfuse and the bind mount; §5 `docker-entrypoint.sh` | 21, 27–34 |
+| §3.8 One key, many consumers; §5 `docker-shell*.sh` | 11, 13, 29, 34 |
+| §7 Where this sits in the course | 8–12 (L03, L04, L10 recalled), 35–36 (choosing a tool for your project) |
+| §2, §6, §8, §9 | none (tutorial-only) |
+| not in this guide | 15–18 (labeling platforms, curation), 21–22 (bucket vs data lake, table formats), 24 (the renamed-copies anti-pattern), 38–40 (monitoring) |
+
+**Lecture ideas you need for this tutorial**
+1. Labels are the ground truth a model learns from and is graded on. Consistent labels matter as much as correct ones, and labeling the model's mistakes and edge cases makes the next dataset version (slide 4).
+2. Use a labeling tool, because labeling by hand is slow and inconsistent; running Label Studio in your own container keeps outside labeling services away from your data (slides 5, 7).
+3. The labeling station reuses three earlier ideas: a Docker network lets containers talk, credentials control access to cloud storage, and Compose runs related containers together (slides 8–12).
+4. The station is two containers: Label Studio (port 8080, a mounted data folder) and a CLI container (source code mounted, you shell in to run `cli.py`). Both get the secrets folder and `GOOGLE_APPLICATION_CREDENTIALS` (slide 13).
+5. Version data to track changes, roll back, pass audits, work together and avoid duplicate copies, and never by renaming files to `…final-final-v3` (slides 20, 23–24).
+6. There are four approaches: file-based (hashes plus Git: DVC), object-store (lakeFS, no Git), table-based (Delta Lake, Iceberg) and full snapshots. There is no single standard; choose by data type, scale and platform (slides 22–23, 25, 35–36).
+7. A bucket only stores named objects. A data lake is the same bucket plus tools to add, find, control, prepare and version the data (slide 21).
+8. An old version can be read only while its files are kept. Here that means: keep `dvc_store/` (slide 22, "time travel").
+9. gcsfuse mounts the bucket at `/mnt/gcs_data`, and a bind mount re-exposes its `images/` folder at `/app/cheese_dataset`, where DVC works on it like a local folder. The mount command has four parts: the tool, the key file, the bucket name (unique across GCP) and the mount point (slides 27–34).
+10. Monitoring, with no tutorial: watch quality, freshness, drift (such as many more images of one cheese), cost, and which step failed. Use fixed rules when expectations are known, learned baselines when they are not, and lineage for the rest (slides 38–39).
+
+**Where the slides and today's tutorial differ** (in each case the repos, as verified here, are what runs today)
+- Slide 6 ends in "Colab {training}". L11 trains nothing: the notebook only runs `dvc list`/`dvc get --rev` and counts files, Part B versions a different bucket's unlabeled `images/`, and L13 trains on a GitHub-release zip (§1 note, Exercise E7).
+- Slide 6 draws the labeled set as photos sorted by cheese. Label Studio writes one JSON annotation per label into `cheeses_labeled/`, and the photos never move (§3.1).
+- Slide 7 says nothing gets uploaded externally. The photos are in your own GCS bucket, and the browser downloads them from Google with pre-signed URLs, which is why CORS is needed (§3.2–3.3).
+- Slide 13 links the browser only to Label Studio and draws no line between the containers. The browser also fetches images straight from GCS, and `cli.py -p/-t` call `http://data-label-studio:8080` over `data-labeling-network` (§3.4).
+- Slides 6, 13, 14 and 26 use other names: one "Data Labeling Container" is really `data-label-studio` plus `data-label-cli`; `docker-volume/label-studio` is `docker-volumes/label-studio`; "expose port 8080" is publishing with `-p 8080:8080`; the "Data Versioning Container" is `data-version-cli`.
+- Slides 16–18 write a bucket path as `gcs://…`. Real bucket URIs start with `gs://`, as in `dvc remote add -d cheese_dataset gs://YOUR_BUCKET_NAME/dvc_store`.
+- Slide 25 says Git records each file's fingerprint. Git holds `cheese_dataset.dvc`, whose one md5 is the fingerprint of a `.dir` manifest; the manifest with the per-file md5s lives in `.dvc/cache` and `dvc_store/` (§3.5–3.6).
+- Slides 27–28 speak of "mounting disks". What is mounted is a bucket, through FUSE; GCP disks are a different product.
+- Slides 32–33 say there is no local copy and that DVC's reads and writes go to the bucket. `dvc add` copies every image into `.dvc/cache` on your disk, and `dvc push` uploads through the Storage API, not the mount; the host's `cheese_dataset/` stays empty (§3.7, Exercise E6).
+- Slide 34's colour-coded line has an em dash before `key-file` and a shortened `$GOOGLE_APP_CREDS`. Type the slide's first line, which matches the entrypoint: `gcsfuse --key-file=$GOOGLE_APPLICATION_CREDENTIALS $GCS_BUCKET_NAME /mnt/gcs_data`.
 
 ## Command checklist
 

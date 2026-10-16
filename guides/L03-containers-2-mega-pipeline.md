@@ -14,7 +14,7 @@
 - **安全坑：** `.gitignore` 只管 Git，不管 Docker。`COPY --chown=app:app . ./` 会把 `secrets/mega-pipeline.json` 一起拷进 image（capture 里用一个 placeholder 文件验证过），README 最后 optional 的 Docker Hub push 就等于把 key 公开。在每个 component 里加一个 `.dockerignore`，内容就一行 `secrets/`，再 rebuild；run 的时候 mount 照样把 key 带进 container。
 - **README 的小 errata：** component README 里的 Canvas 链接（file `23163432`）比主 README 的（`25687801`）旧，用主 README 的；`synthesis_audio_en`、`synthesis_audio` 的文字说 "keep `ffmpeg`"，但给的 `ARG` 里没有 ffmpeg，以 code block 为准；appendix 的 sample Dockerfile 是 `build-essential curl`，也没有 ffmpeg，不要直接贴进 `transcribe_audio`；四个 component 的 `.gitignore` 把你写的 `Dockerfile`、`pyproject.toml`、`uv.lock` 都 ignore 了，放进自己的 repo 要 `git add -f`。
 - **做完要删：** GCP 上没有你建的东西（没有 VM、bucket、service account），不用删；你的 output 留在 shared bucket 里你组的 prefix 下。本地：`docker image rm transcribe_audio generate_text synthesis_audio_en translate_text synthesis_audio`，再 `docker image prune -f` 和 `docker builder prune`（加 `.dockerignore` 之前的旧 build 里有 key）。key 不要进任何 repo；如果 push 过带 key 的 image，删掉并告诉 staff。
-- **Lecture slides：** 老师的 Lecture 3 slides（71 页；1–29 页是本讲和这个 tutorial，30–69 页在 Lecture 4 再讲一遍）和这份 guide 各节怎么对应、做 tutorial 需要的 10 个 lecture ideas，以及 slides 和今天 README/capture 不一样的 8 处，都在下面的 [Lecture slides](#lecture-slides)。最要紧的两处：① slide 33 说先 `COPY . .` 再装依赖是 "classic mistake"，而 README 的 Dockerfile 正是先 `COPY --chown=app:app . ./` 再 `RUN uv sync`，所以改任何文件再 build 都会重跑 `uv sync`；slide 的写法要先有 `uv.lock`（`uv add` 之后才有）。② slides 的 base image 是 `python:3.14`，这个 tutorial 用 `python:3.12-slim-bookworm`，照 README 写。
+- **Lecture slides：** 老师的 Lecture 3 slides（71 页；1–29 页是本讲和这个 tutorial，30–69 页除 slide 38 外在 Lecture 4 再讲一遍）和这份 guide 各节怎么对应、做 tutorial 需要的 10 个 lecture ideas，以及 slides 和今天 README/capture 不一样的 8 处，都在下面的 [Lecture slides](#lecture-slides)。最要紧的两处：① slide 33 说先 `COPY . .` 再装依赖是 "classic mistake"，而 README 的 Dockerfile 正是先 `COPY --chown=app:app . ./` 再 `RUN uv sync`，所以改任何文件再 build 都会重跑 `uv sync`；slide 的写法要先有 `uv.lock`（`uv add` 之后才有）。② slides 的 base image 是 `python:3.14`，这个 tutorial 用 `python:3.12-slim-bookworm`，照 README 写。
 
 ## At a glance
 
@@ -65,7 +65,7 @@
 
 The instructor's deck for this lecture is *Lecture 3: Containers II* (`L03_containers_ii`), 71 slides. Slide numbers are PDF page numbers; the printed footers differ.
 - Slides 1–29 belong to this lecture: the recap, monolith vs microservices, and this tutorial.
-- Slides 30–69 cover build optimization, Compose, networking and team workflows. They come back in the Lecture 4 deck, where they pair with L04's `port_toy` and `flexible-workflow`.
+- Slides 30–69 cover build optimization, Compose, networking and team workflows. All but slide 38 come back in the Lecture 4 deck, where they pair with L04's `port_toy` and `flexible-workflow`.
 
 The slides are not reproduced here; what follows is in our own words. The full slide digest and the cross-check with the video are in the Explainer_Videos repo, in `videos/ac215-l03-mega-pipeline/SLIDES.md`. This answers the slides half of §9 Q6.
 
@@ -83,7 +83,8 @@ The slides are not reproduced here; what follows is in our own words. The full s
 | §3.8 Secrets hygiene; §4 Steps 24–26; §6 G1, G6 | 31–32, 34, 43 (secrets stay out of the image); 19, 67–68 (push to a registry); 41 (target platform) |
 | §4 Step 27 (keep your work); §6 G14 | 20–21, 65–69 (who owns the Dockerfile and uv files) |
 | §7 Where this sits in the course | 70 (next: identities you create); 44–63 (Compose, networking: L04) |
-| §3.7 Managed APIs, §5 Code tour, §8 Exercises, §9 Errata | none (tutorial-only) |
+| §8 Exercises; §9 Errata | 33 (B3), 41 (D3), 7 and 15 (D4); 25 (E18) |
+| §3.7 Managed APIs, §5 Code tour | none (tutorial-only) |
 
 **Lecture ideas you need for this tutorial**
 1. **Why five containers.** A monolith runs every module in one process on one stack. Microservices let each part fail, change and choose its technology on its own, at the cost of more dependencies to manage (slides 7–17).
@@ -94,14 +95,14 @@ The slides are not reproduced here; what follows is in our own words. The full s
 6. **Wheels and base images.** A prebuilt wheel just unpacks; a source package needs compilers. `-slim` is the default base when your dependencies ship wheels (slides 35–37).
 7. **Measure first.** Before optimizing, run `docker images` for each image's size and `docker history` for each layer's (slide 38).
 8. **Layers only add.** Install and clean up in the same `RUN` (slide 40).
-9. **Variable lifetimes.** `ARG` exists only during the build. `ENV` lives on in the image and the container. `-e` sets a value at run time (slide 54).
+9. **Variable lifetimes.** `ARG` exists only during the build. `ENV` lives on in the image and the container. `-e` sets a value at run time (slides 53–54).
 10. **Docker in a team.** A release is one image in a registry. Early on, everyone builds locally and develops inside containers; later, teammates pull prebuilt images from Docker Hub (slides 18–19, 65–69).
 
 **Where the slides and today's tutorial differ** (the README and the 2026-10-13 captures decide)
 - **Base image.** The slides use `python:3.14` (and `-slim`, `-alpine`). This tutorial pins `python:3.12-slim-bookworm` (Python 3.12.15 in the captures), the same slim choice. Type the README's line (§4 Step 6).
 - **Cache order.** Slide 33 calls copying all the code before installing dependencies the "classic mistake". The README's Dockerfile does exactly that (`COPY --chown=app:app . ./`, then `RUN uv sync`), so every edit re-runs `uv sync` (captured, §4 Step 14). The slide's order needs a `uv.lock`, which exists only after Step 9 (§8 B3).
 - **`docker images` output.** Slide 38 shows one `SIZE` column. Docker Engine 29 with the containerd image store prints `DISK USAGE` and `CONTENT SIZE` (1.35GB / 357MB, §4 Step 7). Which one you see depends on Docker's image store.
-- **The flow picture.** Slide 25, which is the repo's `mega-pipeline-flow.png`, draws English synthesis above Translate, with its bucket link behind the Translate tile. In the code, C reads `text_paragraphs/` (B's output), as D does (§9 E18).
+- **The flow picture.** Slide 25, the repo's `mega-pipeline-flow.png` with the instructor's portrait added, draws English synthesis above Translate, with its bucket link behind the Translate tile. In the code, C reads `text_paragraphs/` (B's output), as D does (§9 E18).
 - **Teams.** Slide 24 says separate teams for each component. Slide 26 and `README.md:52` say each team builds all five. Follow the README.
 - **Next lecture.** Slide 70 names "Connecting to the Cloud", which comes later in the course. The next tutorial here is L04, `flexible-workflow` (§7). Both move you to your own service account.
 - **The tutorial's name.** The slides call it "Tutorial 5" or "T5" (slides 27, 70); this guide and the video call it L03.

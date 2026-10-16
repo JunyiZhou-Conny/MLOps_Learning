@@ -12,6 +12,7 @@
 - **Idea 5 · storage：** container 用完就删（`--rm`），state 只活在 bind mount 里：Chroma 的数据在 `llm-rag/docker-volumes/chromadb`，`docker compose down` 不会删 vectors。v0 其实完全不碰 Cloud Storage（GCS）：GCS 的 read/write 在 L03/L08 的代码里，L11 才真正用上。
 - **最费时间的坑：** ① `api-service/docker-shell.sh:14` 是不 idempotent 的 `docker network create`，加上 `set -e`，只要 network 已经存在（照 README 先建了 network，就一定存在），脚本立刻退出，什么都没 build。改成 `docker network inspect cheese-app-network >/dev/null 2>&1 || docker network create cheese-app-network`，或者删掉这行。② `secrets/` 必须正好在 service folder 上面两层（`AC215/secrets/`），文件名要对（不是 `.json.json`），而且要先 `cd` 进 service folder 再 `sh docker-shell.sh`。位置不对时 Docker 会悄悄 mount 一个空 folder，文件名不对也一样找不到 key，两种情况都要到第一次 call 才报 `DefaultCredentialsError: File /secrets/llm-service-account.json was not found.`；没先 `cd` 进去的话，`api-service` 的脚本在 `docker build` 这一步就失败了（`api-service/docker-shell.sh:16`）。
 - **做完要关/删：** cloud 上不建任何会 idle 计费的资源（没有 VM、bucket、endpoint），只按 Gemini call 计费。API 和 frontend 的 terminal 各 `Ctrl+C` 再 `exit`；在 `llm-rag` 里 `docker compose down` 关掉 Chroma（想彻底重置再删 `llm-rag/docker-volumes/`）；可选 `docker network rm cheese-app-network`；不再用的 key 在 IAM 里删掉；做了 E7 的话 `gcloud storage rm -r gs://YOUR_BUCKET`。
+- **Lecture slides：** 老师的 Lecture 10 slides（`L10_connecting_to_the_cloud_3_`，55 页）讲三块理论：networking（IP、port、`-p HOST:CONTAINER` 这条 tunnel、Docker DNS）、authentication（service account、IAM、least privilege，外加 API key、OAuth、Workload Identity Federation）和 Cloud Storage；最后一节 Google Drive 在 tutorial 里没有对应，CORS、ADC、Vertex AI 则 slides 完全没讲。这份 guide 各节和 slides 怎么对应、做 tutorial 需要的 9 个 lecture ideas，以及 slides 和 tutorial 不一样的 6 处，都在下面的 [Lecture slides](#lecture-slides)。最要紧的两处：① slides 建的是 `data-service-account`（L11 才用这个名字），而且只给一个 storage role；这个 app 的脚本找的是 `llm-service-account.json`，还必须有 Gemini Enterprise Agent Platform User（`roles/aiplatform.user`），否则第一个 embedding 就 403；② slides 把 Containers II 的命令写成 `-p 8090:9100`，port_toy 实际用的是 `-p 127.0.0.1:8090:9100`；cheese-app-v0 没加 `127.0.0.1:`，publish 在所有地址上（`0.0.0.0`），同一个 Wi-Fi 上的设备可能直接调用你那个没有登录、却花你 Vertex AI 钱的 API。
 
 ## At a glance
 
@@ -54,6 +55,46 @@
 - **How to read the references.** A path without a repo name is inside `cheese-app-v0/`; `README.md` is `cheese-app-v0/README.md` unless another repo is named. Short names: `rag.py` = `api-service/api/routers/rag.py`, `service.py` = `api-service/api/service.py`, `cli.py` and `docker-compose.yml` = the files in `llm-rag/`, `DataService.js` and `Common.js` = `frontend-ai-chatbot/src/services/…`, `ChatComponent.jsx` = `frontend-ai-chatbot/src/components/chat/ChatComponent.jsx`, `hooks.jsx` = `frontend-ai-chatbot/src/hooks/hooks.jsx`, `next.config.js`, `.env.development` and `package.json` = files in `frontend-ai-chatbot/`. A bare `docker-shell.sh:N` or `docker-entrypoint.sh:N` means the script of the service being discussed.
 
 </details>
+
+## Lecture slides
+
+The instructor's deck for this lecture is *Lecture 10: Connecting to the Cloud: Networking, Authentication & Storage* (`L10_connecting_to_the_cloud_3_`), 55 slides. Slide numbers are PDF page numbers; the printed footers differ, because the deck was cut from a longer one. The slides are not reproduced here; what follows is in our own words. The full slide digest and the cross-check with the video live in the Explainer_Videos repo, in `videos/ac215-l10-cloud-connect/SLIDES.md`. The deck is the theory behind this tutorial's plumbing: networking (the Containers II gateway and processor, revisited), authentication and IAM, and Cloud Storage, using the L03 Mega Pipeline as its storage example. It never names `cheese-app-v0` (its "Tutorial" section is an empty divider) and never mentions CORS, ADC, `0.0.0.0` or Vertex AI. Its last section, Google Drive, has no counterpart in the tutorial. The slides answer part of §9's last open question: the lecture adds the networking and authentication theory, while the tutorial's steps all come from the README.
+
+**Map**
+
+| This guide | Slides |
+|---|---|
+| At a glance; §1 What you build | 5–6, 11 (every machine and container has addresses; laptop vs cloud), 53 |
+| §2 (service account and key); checklist *Setup GCP Service Account*; §4 Step 1 | 24–25, 32–38 (the same console steps, for a differently named account) |
+| §3.1; §6 #13, #14 | 24–25, 27–28 (default service accounts), 29–31 (federation; choosing the tool), 37 (the console's key warnings) |
+| §3.2 | 42 (the env var points the client library at the key); 19–23, 29–30 (access tokens and short-lived tokens). The slides never say "ADC". |
+| §3.3; §6 #3; §8 E3, E6 | 26 (authentication vs authorization, least privilege), 35, 42, 45 |
+| §3.4; §6 #2 | 38, 42 |
+| §3.5; §4 Steps 2–5; §6 #6, #9, #10; §8 E5, E8 | 4–10 (IP addresses, ports and their ranges, publishing as a tunnel, Docker DNS) |
+| §3.6; §6 #8; §8 E1 | none (CORS is not on the slides); 11 and 13 ask the related question, who is allowed in |
+| §3.7; §5 Excerpt 12; §8 E7 | 39–45 (Cloud Storage) |
+| §3.8; §4 Steps 6–11; §5 (other excerpts); §6 (other items); §7; §9 | none (tutorial-only) |
+
+Lecture-only: authentication factors and MFA (14–16), API keys (17–18), OAuth 2.0's user-consent flow (19–23), Workload Identity Federation in detail (29–30) and Google Drive (46–51).
+
+**Lecture ideas you need for this tutorial**
+1. An IP address picks the machine, a port picks the service on it, and `localhost` always means "this machine". Inside a container, that is the container (slides 5–7).
+2. `-p HOST:CONTAINER` tunnels a port you choose on the laptop to the port the app listens on inside the container: `3200:3000` is why you open 3200, not 3000 (slide 9).
+3. Containers on a shared Docker network dial each other by name; Docker's DNS returns the current address, which can change when a container restarts (slide 10).
+4. Once an address and a port are reachable, anyone who can reach them can knock, and an unprotected AI endpoint means runaway bills. The question becomes who is allowed in (slides 11, 13).
+5. A service account is an identity for code, with no human and no login screen. You create it under IAM & Admin → Service accounts, grant it roles, and download a JSON key into `secrets/` (slides 24–25, 32–38).
+6. Authentication proves who is calling; authorization (IAM roles) decides what it may do. Grant each account only what it needs (slides 26, 45).
+7. A container reaches Google through the key folder mounted at `/secrets` and `GOOGLE_APPLICATION_CREDENTIALS` pointing at the file; the client library reads it, so no password appears in the code (slides 42–43).
+8. Pick the auth tool by who acts and where: an API key for metered public calls, OAuth 2.0 for an app acting for a user, a service account for code, Workload Identity Federation for code outside Google Cloud. A downloaded key is the risk to manage (slides 29–31, 37).
+9. Cloud Storage keeps objects in buckets under a flat key space, where "folders" are name prefixes. Storage Object Admin is enough to read and write objects, bucket names are global, and you delete what you don't need (slides 40–45).
+
+**Where the slides and the tutorial differ** (in each case the tutorial's scripts, or the earlier lectures' terminal captures, show what the commands do)
+- Slides 33–38 create `data-service-account` and its key `data-service-account.json`, which is L11's name. This tutorial's scripts look for `llm-service-account.json`, and any other name ends in `DefaultCredentialsError` (§2, §6 #2).
+- Slides 35–36 grant a single storage role, and slide 45 recommends Storage Object Admin. This app needs **Gemini Enterprise Agent Platform User** (`roles/aiplatform.user`); without it the first embedding gets a 403. The README's Storage Admin is not used by v0 (§3.3, §6 #3, E6).
+- Slide 42 mounts `"$PWD/../secrets"`, one level up. Here the scripts mount `../../secrets`, two levels up; each reaches `AC215/secrets` from where its script sits (§3.4).
+- Slides 4, 9 and 11 write the Containers II command as `-p 8090:9100`. port_toy used `-p 127.0.0.1:8090:9100`, which publishes on the laptop only. This app publishes without the prefix (`docker ps` shows `0.0.0.0:…`), so other devices on your Wi-Fi may reach your API, which has no login and spends your Vertex AI budget. *(extra)* `-p 127.0.0.1:9000:9000` narrows it (§3.5).
+- Slide 31 sends code running outside Google Cloud to Workload Identity Federation, and the console's banner on slide 37 prefers it to keys. A laptop has nothing for Google to federate with, so the tutorial uses a JSON key: treat it like a password (§3.1, §6 #13–14).
+- Slides 40–44 retell the L03 Mega Pipeline with a `/secrets` mount, `gs://ac215-mega-pipeline` and `data-service-account.json`. L03 itself used `mega-pipeline-bucket` and the shared Canvas key at `secrets/mega-pipeline.json` inside each folder (§3.7, §7).
 
 ## Command checklist
 

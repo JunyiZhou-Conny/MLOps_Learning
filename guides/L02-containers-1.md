@@ -13,7 +13,7 @@
 - **最费时间的坑：** ① VM 上 `sudo apt install docker.io` 报 `E: Unable to locate package docker.io`：这一节漏了 `sudo apt-get update`，先 update 再装（capture：Debian 12 装到 Docker 20.10.24，Debian 13 是 26.1.5）。② 不加 `sudo` 的 `docker` 命令报 `permission denied … docker.sock`。③ 没 login，或者名字前缀不是自己的 username，push 报 `push access denied … insufficient_scope`。④ Docker Hub 匿名 pull 有 rate limit，报 `toomanyrequests`：等一会儿，或者先 `docker login`。⑤ 跑过 `docker-build-push.sh` 之后当前 builder 变成 `multi-arch`，普通 `docker build` 的结果不会进本地 image list：`docker buildx use default`。
 - **README 的几个小 errata：** Step 4 说 pull "the image you pushed"，命令却是老师的 `dlops/simple-translate`（它只有 `linux/amd64`，里面还是旧版 `cli.py`，没有 `raise_exception=True`，被 Google 拒绝时会把原文当成翻译打印出来）；`docker login -p` 会把 token 留在 shell history 里（Docker 自己也会 warning），改用 `docker login -u <USER NAME>` 再 paste；"Build the docker container" 其实 build 出来的是 image；`docker system prune` 不加 `-a` 只删 dangling images。
 - **做完要删：** Delete VM（boot disk 默认一起删），再检查 VM instances 和 Disks 两页都是空的。Docker Hub repo 默认是 public，不需要就删掉或者设成 private。laptop 上用 `docker system prune -a` 回收空间；跑过 push script 的话再 `docker buildx rm multi-arch`。
-- **Lecture slides：** 老师的 Lecture 2 slides（81 页）和这份 guide 各节怎么对应、做 tutorial 需要的 10 个 lecture ideas，以及 slides 和今天 repo/captures 不一样的 12 处，都在下面的 [Lecture slides](#lecture-slides)。最要紧的两处：① slide 64 的 run 命令多了 `--entrypoint /bin/bash`，它会连 CMD 一起换掉，venv 没有 activate，`python cli.py` 报 `ModuleNotFoundError`：照 README 用 `docker run --rm -ti simple-translate`。② slide 57 的 Dockerfile 是早期版本（`ADD . /`，CMD 里 source 的是 `/home/app/.venv/bin/activate`，但 `uv sync` 建的是 `/.venv`）：照 repo 的 `Dockerfile.txt` 来。slides 没讲 CPU platform（arm64/amd64），这部分只有 tutorial 里有。
+- **Lecture slides：** 老师的 Lecture 2 slides（81 页）和这份 guide 各节怎么对应、做 tutorial 需要的 10 个 lecture ideas，以及 slides 和今天 repo/captures 不一样的 12 处，都在下面的 [Lecture slides](#lecture-slides)。最要紧的两处：① slide 64 的 run 命令多了 `--entrypoint /bin/bash`，它会连 CMD 一起换掉，venv 没有 activate，`python cli.py` 报 `ModuleNotFoundError`：照 README 用 `docker run --rm -ti simple-translate`。② slide 57 的 Dockerfile 和 repo 的 `Dockerfile.txt` 不是同一个版本（`ADD . /`，CMD 里 source 的是 `/home/app/.venv/bin/activate`，但 `uv sync` 建的是 `/.venv`）：照 repo 的 `Dockerfile.txt` 来。slides 没讲 CPU platform（arm64/amd64），README 也没讲，只有 repo 的两个脚本处理了它。
 
 ## At a glance
 
@@ -84,7 +84,7 @@ The instructor's deck for this lecture is *Lecture 2: Containers I*, 81 slides. 
 | §2 costs, §3.7 CPU platforms, §3.8 two Pythons | none (tutorial-only) |
 
 **Lecture ideas you need for this tutorial**
-1. VMs isolate well but are heavy. Venvs are light but share the host's OS. Containers aim for automatic setup, isolation, a small footprint and fast start-up (slides 5–7).
+1. VMs isolate well but are heavy. Venvs make dependencies explicit and reproducible but share the host's OS. Containers aim for automatic setup, isolation, a small footprint and fast start-up (slides 5–7).
 2. A container is user-space code: its own files, processes and network on the host's Linux kernel. That is why your image holds Debian's files and no kernel (slides 9–12, 22).
 3. Kernel namespaces give each container its own view (PID, mount, network, IPC, UTS, user), and cgroups cap what it can use. Docker adds seccomp, AppArmor/SELinux and least privilege for security; these are not the same thing as cgroups. Because of the PID namespace, bash is process 1 in your container (`echo $$`, §4 A+2) (slides 13–21).
 4. On macOS and Windows, Docker Desktop runs a small Linux VM to provide that kernel. On the GCP VM, Docker runs directly on its Linux (slides 23–24).
@@ -97,16 +97,16 @@ The instructor's deck for this lecture is *Lecture 2: Containers I*, 81 slides. 
 
 **Where the slides and today's tutorial differ** (the 2026-10-13 captures show what runs today)
 1. Slide 64's run command adds `--name simple-translate` and `--entrypoint /bin/bash`. Overriding the entrypoint also drops the image's CMD, so the venv isn't activated and `python cli.py` fails with `ModuleNotFoundError`. Use the README's `docker run --rm -ti simple-translate` (§3.4).
-2. Slide 57's Dockerfile is an earlier draft of `Dockerfile.txt`: `ADD . /`, `build-essential git`, two commented-out uv `ENV` lines, and a CMD that sources `/home/app/.venv/bin/activate`. That path doesn't exist here, because `uv sync` creates `/.venv`. Build the repo's `Dockerfile.txt` (§4 Step 12).
+2. Slide 57's Dockerfile is a different version from the repo's `Dockerfile.txt`: `ADD . /`, `build-essential git`, two commented-out uv `ENV` lines, and a CMD that sources `/home/app/.venv/bin/activate`. That path doesn't exist here, because `uv sync` creates `/.venv`. Build the repo's `Dockerfile.txt` (§4 Step 12).
 3. The screenshots on slides 58–60 come from other builds: a `python:3.11-slim-buster` base, a 483MB image, and a history with `USER app`, `WORKDIR /app` and `ENTRYPOINT ["uv" "run"]`. Compare your output with §4's captures, not with these.
-4. Slides 70–72 pull your own pushed image on the VM, but the README's command runs the instructor's `dlops/simple-translate` (amd64 only). An image built on Apple Silicon needs an amd64 build first, which the slides never mention (§9 E3, E4).
+4. Slides 70–72 end by pulling the image you pushed and running it, but the README's VM command runs the instructor's `dlops/simple-translate` (amd64 only). An image built on Apple Silicon needs an amd64 build first, which the slides never mention (§9 E3, E4).
 5. Slide 67 passes the token with `-p`, as the README does, and Docker warns that this is insecure. Type `docker login -u <USER NAME>` and paste the token (§9 E9).
 6. Slide 73 cleans up with `docker system prune -a`; the README's `docker system prune` keeps named images. Both are right, and `-a` is the end-of-lab clean-up (§9 E8).
 7. The checklist slides say "Build a container" and "Push container". The build makes an image, as slides 30 and 56 say (§9 E7).
 8. Slide 34 says every command makes a layer, and slide 37 draws the kernel and a single Python as image layers. `docker history` shows that `ENV`, `ENTRYPOINT` and `CMD` are `0B`, the apt/pip/uv step is one layer, the code is a layer, the kernel is the host's, and the image holds two Pythons (§3.1, §3.8).
 9. Slides 22 and 24 draw system calls going through the Docker daemon. In fact a container's own processes call the kernel directly; the daemon sets up their namespaces and cgroups (§3.6).
 10. Slides 24 and 52 name HyperKit (Mac) and Hyper-V (Windows). Current Docker Desktop uses Apple's Virtualization framework on a Mac and WSL 2 on Windows, but the idea, a small Linux VM, is the same. This wasn't checked here: there is no Mac or Windows capture.
-11. Slide 17 says root in a container is non-root on the host. That needs user-namespace remapping or rootless Docker, which a default install doesn't turn on, so treat the container's root as root (§6 #22).
+11. Slide 17 says root in a container is non-root on the host. That needs user-namespace remapping or rootless Docker, which a default install doesn't turn on, so treat the container's root as root (§4 Step 8 reads the `root` prompt; L03's non-root user is in §7).
 12. The links on slides 72 and 77 end in `-t3` / `-t4`, anchors the README doesn't have, so they open the README at the top. Use the section links under Links.
 
 ## Command checklist
