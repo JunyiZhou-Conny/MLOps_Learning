@@ -85,7 +85,7 @@ The instructor's deck for this lecture is *Lecture 11: Data Labeling, Versioning
 | §3.8 One key, many consumers; §5 `docker-shell*.sh` | 11, 13, 29, 34 |
 | §7 Where this sits in the course | 8–12 (L03, L04, L10 recalled), 35–36 (choosing a tool for your project) |
 | §2, §6, §8, §9 | none (tutorial-only); slides 38–40 settle §9's open question on monitoring |
-| not in this guide | 15–18 (labeling platforms, curation), 21–22 (the data-lake and table-format ideas themselves), 24 (the renamed-copies anti-pattern), 38–40 (monitoring) |
+| lecture-only (no tutorial section; some appear in the ideas below) | 1–3, 19, 37, 41 (title, agenda, closing); 15–18 (labeling platforms, curation); 21–22 (the data-lake and table-format ideas themselves); 24 (the renamed-copies anti-pattern); 38–40 (monitoring) |
 
 **Lecture ideas you need for this tutorial**
 1. Labels are the ground truth a model learns from and is graded on. Labels must be consistent as well as correct, and labeling the model's mistakes and edge cases makes the next dataset version (slide 4).
