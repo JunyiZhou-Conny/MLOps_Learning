@@ -13,7 +13,7 @@
 - **最费时间的两个坑：** ① folder 的名字和位置：clone 出来的 folder 必须叫 `llm-rag`（`docker-compose.yml:12` 写死了 `../llm-rag`），否则 container 一启动就报 `/bin/bash: docker-entrypoint.sh: No such file or directory`；`secrets/` 必须是它的 sibling（`docker-compose.yml:11` 写死了 `../secrets`），key 放错位置要到第一次 `--embed` 才报 `DefaultCredentialsError`，因为 char-split / recursive-split 的 `--chunk` 不调 API。② 403：忘了改 `docker-shell.sh:7` 的 `GCP_PROJECT`（默认是 `ac215-project`），或者没 enable Vertex AI API（README 根本没写这一步），`--embed` 就会报 `PERMISSION_DENIED` / `SERVICE_DISABLED`。（另外：Compose 只在 image 不存在时才 build，`git pull` 改了 dependencies 之后要自己 `docker compose build`。）
 - **README 的 errata：** `SYSTEM_INSTRUCTION` 定义了但从来没传给 model（E1），所以 answer 的 grounding 比 README 说的弱；`out.txt` 是用旧版 Tolminc 书跑的 `--agent`（L06），别指望复现；`chromadb/chroma:latest` 没 pin（2026-10-12 是 1.5.9，client 是 1.1.0）；Storage Admin 这个 role 用不到。
 - **做完要删：** `exit` 只删掉 CLI container，`llm-rag-chromadb` 还在跑、还占着 port 8000，要在 `llm-rag/` 里 `docker compose down`。Cloud 上没有要删的东西（只有 pay-per-call 的 Vertex AI，整个 tutorial 做两遍也远低于 $2）。可选：删 `outputs/` 和 `docker-volumes/`（Linux 上要 `sudo`）；课程结束后在 IAM 里删掉 JSON key。
-- **Lecture slides：** 老师的两份 Lecture 5 slides（deck A "Introduction to RAG" 64 页，deck B "Advanced RAG" 89 页）和这份 guide 各节怎么对应、做 tutorial 需要的 10 个 lecture ideas，以及 slides 和今天的 code/captures 不一样的 9 处，都在下面的 [Lecture slides](#lecture-slides)。最要紧的三处：① slides 按 similarity 排序（越大越近），Chroma 返回的是 cosine distance（= 1 − similarity，越小越近）；② slides 把 metadata filtering 放在 ranking 之后，Chroma 的 `where` / `where_document` 是先过滤再排序，所以 `--query` 的 10 个结果里没有 Tolminc；③ slides 的 semantic chunking 用固定的 0.8 threshold，`semantic_splitter.py` 则是在所有 distance 的 95th percentile 处切。
+- **Lecture slides：** 老师的两份 Lecture 5 slides（deck A "Introduction to RAG" 64 页，deck B "Advanced RAG" 89 页）和这份 guide 各节怎么对应、做 tutorial 需要的 10 个 lecture ideas，以及 slides 和今天的 code/captures 不一样的 9 处，都在下面的 [Lecture slides](#lecture-slides)。最要紧的三处：① slides 按 similarity 排序（越大越近），Chroma 返回的是 cosine distance（= 1 − similarity，越小越近）；② slides 把 metadata filtering 放在 ranking 之后，Chroma 的 `where` / `where_document` 是先过滤再排序，所以 `--query` 的 10 个结果里没有 Tolminc；③ slides 的 semantic chunking 用固定的 0.8 threshold，`semantic_splitter.py` 则在 distance 超过所有 distance 的 95th percentile 的地方切。
 
 ## At a glance
 
@@ -71,7 +71,7 @@
 
 The instructor's slides for this lecture come in two decks:
 - *Lecture 5: Introduction to RAG* (deck A, `L05_RAGs_I_fix`, 64 slides). It walks the naïve-RAG pipeline that this tutorial builds, one box at a time.
-- *Lecture 5 suppl: Advanced RAG* (deck B, `Lec05b_RAG_II_added_j_suffix_in_RRF`, 89 slides). Its semantic-chunking walk-through matches §3.7. Query rewriting, hybrid search, re-ranking and Self-RAG have no code in this tutorial.
+- *Lecture 5 suppl: Advanced RAG* (deck B, `Lec05b_RAG_II_added_j_suffix_in_RRF`, 89 slides). Its semantic-chunking walk-through covers the step in §3.7, with a different cutting rule (see below). Query rewriting, hybrid search, re-ranking and Self-RAG have no code in this tutorial.
 
 Slide numbers are PDF page numbers, written A12 or B46; the printed footers differ. Neither deck shows commands, Docker, ChromaDB or Gemini.
 
@@ -98,12 +98,12 @@ The slides are not reproduced here; what follows is in our own words. The full s
 1. **Why RAG.** LLMs have stale training data, lack domain knowledge, hallucinate and don't cite sources; RAG targets the first two. Pasting every document into the prompt gives garbage, and fine-tuning takes too long (A6–A10).
 2. **Naïve RAG is two lanes.** Knowledge base → chunking → embedding model → vector database. Question → the same embedding model → the database → prompt → LLM. The three phases are Indexing, Retrieval, and Augmentation & Generation (A16, B5).
 3. **One encoder, two moments.** The same embedding model embeds the documents ahead of time and the question when it arrives. That makes retrieval fast, and it's why the query and the chunks must use the same model and size (B59–B61).
-4. **Chunk so retrieval can focus.** Fixed-size character splitting is the default; it cuts words in half and runs sections together. Chunks that follow the document's structure are better (A20–A21, B14–B19).
+4. **Chunk so the model can focus.** Fixed-size character splitting is the default; it cuts words in half and runs sections together. Chunks that follow the document's structure are better (A20–A21, B14–B19).
 5. **Embeddings and similarity measures.** A whole chunk becomes one vector (a sentence embedding, not word embeddings). Cosine similarity compares directions; Euclidean distance and the dot product also count length. Cosine suits text embeddings (A25–A28, A42–A47).
 6. **Why a vector database, and why an index.** SQL can't search by meaning, and comparing the query with millions of vectors one by one is too slow. An index (LSH, PQ or HNSW; Chroma builds HNSW) jumps to likely neighbours. The database returns the top K, with K fixed in advance (A31–A39, A48–A53).
 7. **Optional post-processing.** Metadata filtering and re-ranking are optional. Metadata is data about the data, such as author, publication date and category (A54–A55).
 8. **The final prompt** is a system prompt (how to behave), plus the user's query, plus the retrieved context (A57–A59).
-9. **Semantic chunking.** Split the text into sentences, take each one with a window of neighbours, compare them by the cosine similarity of their embeddings, and join the similar ones (B19–B33).
+9. **Semantic chunking.** Split the text into sentences, pick an anchor sentence with a window of neighbours on each side, compare them by the cosine similarity of their embeddings, join the similar ones, then move the anchor on (B19–B33).
 10. **Limits and next steps** (no code here). Even advanced RAG doesn't guarantee relevant chunks or a supported answer, and it retrieves even when it needn't (B68). The lecture's levers: query rewriting, hybrid search (BM25 plus vectors, merged with Reciprocal Rank Fusion), re-ranking with a cross-encoder, and Self-RAG (B35–B88).
 
 **Where the slides and today's tutorial differ** (the code and the 2026-10-16 captures decide)

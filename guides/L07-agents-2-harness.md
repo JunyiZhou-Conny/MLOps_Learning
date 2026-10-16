@@ -14,7 +14,7 @@
 - **最费时间的坑：** ① `export OPENAI_API_KEY=...` 必须在 `bash docker-shell.sh` **之前**；container 已经在跑的话，`docker exec` 不会刷新 env，要在 container 里 `read -rsp "OpenAI API key: " OPENAI_API_KEY` 再 `export OPENAI_API_KEY`。app 不读 `.env`。② 第一次 `docker build` 很慢：`agent-framework==1.19.0` 拉进 ~30 个 integration、约 235 MB 的 wheel（光 `claude-agent-sdk` 就 103.5 MB，这节课根本没用到）。③ 必须在 `agent-harness/` 目录里跑（mount 用的 `$(pwd)` 和 build 用的 `-f Dockerfile .` 都取决于当前目录）。④ live 的 `manager-approval` 可能永远不弹 approval，因为 model 可能选了一个 ≤ $200 的合法 cart；要稳定地看到 review 就用 `--fixture`（$220.80）。
 - **花多少钱：** 唯一计费的是 OpenAI tokens。一次 live Act 1 run ≈ 20,862 input + 895 output tokens；README 里所有 live command 加起来大约 30–40 个 agent run（粗估 0.5–1 M input tokens）。`--fixture`、`--preview-context` 和 `python -m tests` 完全不联网、不花钱。
 - **做完要删：** 在第一个 shell 里 `exit`（`--rm` 会自动删 container；另开的 `docker exec` shell 退出不会停 container，要 `docker stop agent-harness`）；`docker image rm agent-harness` 回收 image；`outputs/` 里的 SQLite traces 含 prompts 和 outputs（API key 已 redact），不需要就 `rm -rf outputs/`。`../secrets` 只是一个空的 placeholder，不用建 service account。
-- **Lecture slides：** 老师的 Lecture 7A slides（49 页；七个 section 和 README 的七节一一对应）和这份 guide 各节怎么对应、做 tutorial 需要的 10 个 lecture ideas，以及 slides 和 tutorial 不一样的 8 处，都在下面的 [Lecture slides](#lecture-slides)。最要紧的两处：① slides 37/39 的 "layers" 指 agent stack 的五层（LLM、Tool、Context、Harness、Skills），tutorial 的 layer 是 `Trace()`、`Budget(...)` 这种可以 `.without()` 拆掉的 harness feature；② slide 27 的 skill 带 agent 会执行的 `scripts/`，这个 harness 故意去掉了 `run_skill_script`：skill 只给 guidance，不执行 code。
+- **Lecture slides：** 老师的 Lecture 7A slides（49 页；七个 section 和 README 的七节一一对应）和这份 guide 各节怎么对应、做 tutorial 需要的 10 个 lecture ideas，以及 slides 和 tutorial 不一样的 8 处，都在下面的 [Lecture slides](#lecture-slides)。最要紧的两处：① slides 37/39 的 "layers" 指 agent stack 的各层（slide 37 是五层：LLM、Tool、Context、Harness、Skills；slide 39 是 LLM 之外我们自己做的四层），tutorial 的 layer 是 `Trace()`、`Budget(...)` 这种可以 `.without()` 拆掉的 harness feature；② slide 27 的 skill 带 agent 会执行的 `scripts/`，这个 harness 故意去掉了 `run_skill_script`：skill 只给 guidance，不执行 code。
 
 ## At a glance
 
@@ -84,11 +84,11 @@ The instructor's deck for this lecture is *Lecture 7A: LLM: Agents II*, 49 slide
 | §3.2; the checklist's harness notebook cell; §5 Excerpts 2–3 | 20–24 (harness, one turn, action boundary, harness engineering) |
 | Checklist *2. Context Engineering*; §3.3; §5 Excerpt 5 | 12–18, 22 ("instruction vs evidence lanes") |
 | Checklist *3. Agent Harness*, Act 3; §3.4; §5 Excerpts 6–8 | 22–23 (move decisions into code; authority), 36 (autonomy spectrum) |
-| Checklist *3. Agent Harness*, Act 4; §3.5; §5 Excerpts 9–10 | 8, 13–16 (long- and short-term memory), 22 (row "Context & memory") |
+| Checklist *3. Agent Harness*, Act 4; §3.5; §5 Excerpts 9–10 | 8, 13–14, 16 (long- and short-term memory), 22 (row "Context & memory") |
 | Checklist *4. Skills*; §3.6; §5 Excerpt 11 | 26–29 |
-| Checklist *5. Agent Systems*; §3.7; §5 Excerpt 12 | 31–36, 22 (row "Sub agents") |
+| Checklist *5. Agent Systems*; §3.7; §5 Excerpt 12 | 31–33, 36, 22 (row "Sub agents") |
 | Checklist *6. Evaluation*; §3.8 | 39–42 |
-| Checklist *7. Additional Resources* | 44 (the tutorial's Colab and GitHub links); 45–48 are the deck's own "Additional Resources" (cloud GenAI stacks), not the README's |
+| Checklist *7. Additional Resources* | 44 (the tutorial's Colab and GitHub links); 45–48 are the deck's own "Additional Resources" (cloud GenAI stacks and a framework list), not the README's |
 | Setup, §2, §6, §8, §9 | none (tutorial-only); §4 follows the same acts as the checklist |
 
 Lecture-only: 35 (a traditional software component mapped onto an agent) and 37 (the five-layer agent stack and who owns each layer).
@@ -106,14 +106,14 @@ Lecture-only: 35 (a traditional software component mapped onto an agent) and 37 
 10. Measure outcome, trajectory and cost; prefer deterministic checks; change one layer, run the suite k times, compare with a baseline and keep the traces. The eval set is the most valuable artifact (slides 40–42).
 
 **Where the slides and the tutorial differ** (in each case, the repo at `e25dfe9` shows what the code does)
-- "Layers" on slides 37 and 39 are the five parts of an agent stack (LLM, tool, context, harness, skills). In this tutorial a layer is a removable harness feature such as `Trace()` or `Budget(...)` (§3.2), and context and skills are layers *inside* the harness.
+- "Layers" on slides 37 and 39 are the parts of an agent stack: five on 37 (LLM, tool, context, harness, skills), and on 39 the four besides the provider's LLM. In this tutorial a layer is a removable harness feature such as `Trace()` or `Budget(...)` (§3.2), and context and skills are layers *inside* the harness.
 - Slide 27's skill has a `scripts/` folder that the agent runs. The tutorial's skills have only `references/` and `assets/`, and the harness strips the SDK's `run_skill_script` tool (§3.6).
 - Slide 33's manager agent calls other agents as tools. Act 6's outer assistant calls a governed workflow, `start_order(request_id)`, whose one model node is the cart proposer; there is no peer handoff (§3.7).
 - The slides place fixed workflow graphs under Agent Systems (slide 36); the README files the Act 3 workflow under "3. Agent Harness". Same graph, two filings.
-- Slides 21 and 41 list LLM judges. The tutorial uses none (`context_evidence.py`: "no model judge"): deterministic property checks over traces, plus the five-point human review in README §6 (§3.8).
+- Slide 21 lets "judges" verify the work, and slide 41 lists an LLM as judge. The tutorial uses no model judge (`context_evidence.py`: "no model judge"): deterministic property checks over traces, plus the five-point human review in README §6 (§3.8).
 - Slide 22 lets the model decide what is worth remembering. In Act 4 the model has no memory-write tool; only the host writes memory, with `--remember-preference` (§3.5; README.md:488).
 - Slide 21's Think and Reason steps are not in the traces: the README says its logs show "visible execution, not hidden model reasoning" (README.md:198). You see which tools the model asked for, not why.
-- Slides 13–16 call retrieved data "RAG". In Act 2 it is a Python pre-filter over the catalog plus saved preferences, with no embeddings or vector store (§3.3).
+- Slides 13 and 14 call retrieved data "RAG" (slide 16: "External Data", "API Data"). In Act 2 it is a Python pre-filter over the catalog plus saved preferences, with no embeddings or vector store (§3.3).
 
 ## Command checklist
 

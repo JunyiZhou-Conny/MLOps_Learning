@@ -127,7 +127,7 @@ The slides are not reproduced here; what follows is in our own words. The full s
 | §4 A7–A13 (builds, `dev`, `run`, `prod`, clean-up) | 7 (cache order), 10–12 (base image, multi-stage, one `RUN` chain), 13, 37–40 |
 | §4 B3–B14 (`port_toy` by hand) | 7, 12 (the two Dockerfiles), 17, 26 (run-time settings), 33–35 |
 | §8 D2 Rebuild or not? | 26, 7 |
-| §5 Code tour, §7, the rest of §8 and §9 | 12, 20, 34 for the code-tour excerpts; 31, 37–41 for §7; otherwise tutorial-only |
+| §5 Code tour, §7, the rest of §8 and §9 | for the code-tour excerpts: 13 (excerpt 2), 7, 8 and 11 (excerpt 4: copy order, the whole build context, the venv outside `/app`), 20 (excerpts 7–8), 34 (excerpt 9); 31, 37–41 for §7; otherwise tutorial-only |
 
 **Lecture ideas you need for this tutorial**
 1. **Build or pull.** Early in a project everyone builds from the Dockerfile and uv files in Git and sends changes back as pull requests. Later the lead also pushes images to Docker Hub and the others pull. No workflow is perfect: agree on the rules (slides 37–41).
