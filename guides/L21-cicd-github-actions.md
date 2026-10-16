@@ -13,6 +13,7 @@
 - **最费时间的坑：** ① 第一次 run 一定是红的：`src/api-service/api/utils.py:7`（`def power(base,exponent):`）加上三个空行让 Black fail；README 里全绿的截图 `assets/pipline.png` 来自另一个 code state。`pre-commit run --all-files` 修好、commit、push，六个 job 就全绿。② push 了却没有 run：workflow 必须在 repo **root** 的 `.github/workflows/`，放在 monorepo（比如 `MLOps_Learning`）的子文件夹里永远不会跑；只 push feature branch 也不会跑；fork 要先在 Actions tab 里 enable workflows。
 - **README 和 code 里的 errata：** Part 6 选 required check 要按 job 的 `name:`（"Unit Tests"），不是 job ID（`unit-tests`）；README 的 `def broken(): assert False` 根本不会被 pytest collect，要写 `def test_broken(): assert False`。还有一个已知 bug：tests fail 的时候 Slack 永远不会发 "❌ CI Pipeline Failed"，因为 `slack-check` 这个 step 没有 `if: always()`，被 skip 了（§6 G8）。
 - **做完要删：** 本地 `docker stop api-server && docker rm api-server`、`docker system prune`；private repo 上把 workflow Disable（Actions → "CI Pipeline" → "⋯" → Disable workflow），在 run 页面删掉旧的 artifact（`docker-image` 一天后自己过期）。没有任何 GCP 资源要删。
+- **Lecture slides：** 老师的 Lecture 21 slides（35 页）和这份 guide 各节怎么对应、做 tutorial 需要的 10 个 lecture ideas，以及 slides 和今天 repo 不一样的 9 处，都在下面的 [Lecture slides](#lecture-slides)。最要紧的两处：① slides 29–31 说用 `git commit --no-verify` 跳过的 local checks 会在 remote CI 上再跑一遍；但这个 `ci.yml` 只重跑 Black 和 Flake8（而且只看 `api/`），7 个 hygiene hooks（包括 `detect-private-key`）在 CI 里根本不跑，所以用 `--no-verify` commit 进去的 key file 照样一路绿灯（§8 E8）。② slides 26–27 把 pipeline 画成一条直线，最后的 Summary 报告 pass/fail；实际上 `build` 之后四个 job 并行，`test-summary` 只看三个 test job、不看 lint，所以 Black fail 时整个 run 是红的，summary 却打印 "✅ All tests passed!"。
 
 ## At a glance
 
