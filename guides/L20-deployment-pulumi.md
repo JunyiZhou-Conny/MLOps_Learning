@@ -14,6 +14,7 @@
 - **另外两个常见卡点：** `secrets/` 文件夹放在 repo 文件夹**旁边**（`src/deployment` 往上三层，`docker-shell.sh:9`），不是 repo 里面。Apple Silicon 上全是 amd64 emulation，api-service（带 TensorFlow）要 build 几十分钟，可能撞上 30 min timeout；重跑就行，BuildKit cache 会让重试快一些。
 - **deploy 成功但 chat 不工作：** code 里写死的 `gemini-2.0-flash-001` 已经在 2026-06-01 retired，`/api-service/status` 能返回 `{"version":"3.0"}`，但 chat 会失败，要把 `GENERATIVE_MODEL` 改成现役 model（比如某个 `gemini-2.5-flash` 版本）再 redeploy（先 `deploy_images` 再 `deploy_single_vm`）。v3 的 `/docs` 看不到任何 API（被 outer app 占了），检查用 `/status`。
 - **做完要删：** 在 `deploy_single_vm` 里跑 `pulumi destroy --stack dev --refresh -y`（container、VM、两块 disk、firewall、VPC、IP 全删）；Artifact Registry 里的 image 是 `retain_on_delete=True`，destroy 不删，要 `gcloud artifacts repositories delete cheese-app-repository --location=us`；Part A 手动建的 VM README 没让你删，去 console Delete；state bucket 最后删；课程结束时去 IAM 删掉 service-account 的 JSON key。
+- **Lecture slides：** 老师的 Lecture 20 slides（30 页）和这份 guide 各节怎么对应、做 tutorial 需要的 9 个 lecture ideas，以及 slides 和今天 repo 不一样的 9 处，都在下面的 [Lecture slides](#lecture-slides)。最要紧的两处：① slides 21、25、26、28 写的 Google Container Registry (GCR) 已经 retired，code push 到的是 Artifact Registry，而且 `cheese-app-repository` 要你自己先建。② slides 25–26 画的是 VM 这边只用 `gcp-service` 这把只读的 key；但 README 让 VM 以 `deployment@…` 的身份运行，Pulumi pull image 用的也是 deployment 的凭证，`gcp-service` 实际上只给 `api-service` 和 loader 调 Vertex AI 用。另外 slides 里的 models GCS bucket（"class bucket"）和 NFS persistent volume 在 v3 里都不存在：model 从 GitHub release 下载，disk 是挂在 `/mnt/disk-1` 的一块普通 disk。
 
 ## At a glance
 
@@ -67,6 +68,51 @@
 - **Colab notebooks:** none for this lecture.
 
 </details>
+
+## Lecture slides
+
+The instructor's deck for this lecture is *Lecture 20: Deployment: Pulumi*, 30 slides. Slide numbers are PDF page numbers. The slides are not reproduced here; what follows is in our own words. The full slide digest and the cross-check with the video live in the Explainer_Videos repo, in `videos/ac215-l20-deployment-pulumi/SLIDES.md`. The README has no diagrams, so slides 7 and 21–27 are the only pictures of the system you build; the diagram in §1 shows the same system from the code's side.
+
+**Map**
+
+| This guide | Slides |
+|---|---|
+| At a glance; §1 What you build | 5, 7 (the goal picture), 24, 27 |
+| §2 APIs, service accounts and keys; checklist *API's to enable*, *Setup GCP Service Account* | 20, 25–26 |
+| §2 costs; *Tear down, exactly*; checklist *Delete the Compute Instance*; §4 B13 | 15 (`pulumi destroy`), 29 |
+| Checklist *Deployment to GCP (Manual)*; §4 A0–A10 | 8 |
+| Checklist *Deployment to GCP (Single VM Instance)*; §4 B1–B11 | 19–28: B1–B8 are step 1 (19–20); B9 is step 2 (21); B10 is steps 3–6 (22–24); B11 is the test (27); 28 links the README section |
+| §3.1 Infrastructure as Code | 9–12, 17 |
+| §3.2 The engine loop | 12, 14, 16 |
+| §3.3 Projects, stacks, config, state, secrets | 13, 15, 18 (projects, the GCS backend and secrets are tutorial-only) |
+| §3.4 Outputs and the DAG; §3.5 Image tags and StackReference | none (tutorial-only) |
+| §3.6 Providers | 14 (cloud providers only; the command and docker providers are tutorial-only) |
+| §3.7 Identity | 20, 25–26 |
+| §3.8 Reverse proxy | 7, 8 (stage 4), 24 |
+| §7 Where this sits in the course | 4, 5, 9 |
+| §5, §6, §8, §9 | none, except §5 excerpt 6 (a resource declared in the shape of slide 17's example) and §6 gotcha 18 (`--refresh`, slide 16) |
+
+**Lecture ideas you need for this tutorial**
+1. Everything so far runs on your own computer. Deploying puts it on a server that users can reach: here, one GCP VM running the app's containers behind NGINX on port 80 (slides 5, 7).
+2. The manual route has four stages: push the images, prepare a VM, run the containers on their own network, and put NGINX in front as a reverse proxy. Keeping track of all those steps is the reason to automate (slides 8–9).
+3. Pulumi is infrastructure as code in a real programming language (Python here), kept in GitHub. The program declares what should exist, and Pulumi works out how to create it (slides 10–11, 17).
+4. How Pulumi works: the CLI runs your program on one machine (here, the deployment container), compares the desired state with the current one, and calls the providers' APIs to create, update or delete resources (slide 14).
+5. `pulumi up` shows a preview and asks before applying. `--yes` skips the question, `--stack` picks the stack, and `--refresh` re-reads reality first. `preview`, `destroy`, `refresh`, `stack` and `config` are the other everyday commands (slides 15–16).
+6. A stack is one isolated copy of the infrastructure (dev, staging, prod) with its own state and config (slide 18).
+7. The automated deployment has six steps, and the code follows them in order: set up the local container, build and push the images, create the VM, provision it, start the containers, add the web server (slides 19, 21–24).
+8. Two service accounts split the powers: `deployment` (admin on your group's project) builds the infrastructure, and `gcp-service` (read images, call Vertex AI) is for the running app (slides 20, 25–26).
+9. Test from a browser on port 80, and delete everything when you are done (slides 27, 29).
+
+**Where the slides and today's tutorial differ** (in each case the repo, as verified here, is what runs today)
+- Slides 21, 25, 26 and 28 say Google Container Registry (GCR); slides 19–20 say GAR. The code pushes to Artifact Registry (`us-docker.pkg.dev/<proj>/cheese-app-repository`), Container Registry is retired, and you must create the repository yourself (§2, §9 errata 1 and 3).
+- Slides 20, 25 and 26 have `gcp-service` read the images on the VM. Pulumi's Docker provider pulls with the deployment container's credentials, that is, as `deployment`. The `gcp-service` login on the VM only helps a `docker pull` you type by hand (§3.7).
+- Slides 25–26 put only the narrow key on the VM side. The VM itself runs as `deployment@…` (README line 355 sets `security:gcp_service_account_email` to it), limited only by its scopes. The `gcp-service` key is mounted into `api-service` and the loader for Vertex AI, which slide 26 does not draw (§3.7, §6 gotcha 19).
+- Slides 7 and 22–27 have the VM read models from a GCS "class bucket". In v3 the API downloads its model from a GitHub release into `/persistent/experiments`, `GCS_BUCKET_NAME` is never read, and the only bucket in use is the Pulumi state bucket, which no slide shows (§2, §9 erratum 13).
+- Slides 7 and 22–27 draw an NFS "GCE Persistent Volume" (labelled "Leaderboard" on 22–27). It is a 50 GB block disk mounted at `/mnt/disk-1`, holding `/persistent` (the model and chat history) and ChromaDB's folder, and there is no leaderboard (§4 B10, §6 gotcha 23).
+- Slide 23 labels the frontend HTTP 80. It listens on 3000, as slides 7 and 24 say; only nginx has port 80 (§1).
+- Slides 8 and 28 name only the API and the frontend (plus nginx), and slides 7 and 23–24 draw four containers. Both routes run five: the vector DB, the one-shot loader, `api-service`, `frontend` and `nginx` (§4 A6–A8, B10; §9 erratum 14).
+- Slide 18 suggests stack names like `cheese-app-dev`. The tutorial uses a stack called `dev` in each of two projects (`deploy-images`, `deploy-single-vm`). Keep those names, because `StackReference("organization/deploy-images/dev")` depends on them (§3.5, §5 excerpt 9).
+- Slide 14 says Pulumi manages infrastructure through cloud APIs. Steps 4–6 go through SSH instead: provisioning runs create-only shell scripts that Pulumi cannot look into (so they must be idempotent), and the containers are managed through the VM's Docker daemon (§3.6).
 
 ## Command checklist
 

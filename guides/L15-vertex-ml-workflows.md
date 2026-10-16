@@ -13,6 +13,7 @@
 - **最费时间的坑 1：** 每个 `docker-shell.sh` 都写死了老师的 project 和 bucket，`model-deployment/cli.py` 里还写死了老师的 endpoint，这些全部要改成你自己的。`--platform` 也各不相同（arm64 / amd64）：在 Intel/AMD 机器上 build arm64 image 会极慢或者直接 `exec format error`，要先把 arm64 那行改掉。
 - **最费时间的坑 2：** README 没让你建 `GCS_PACKAGE_URI` 那个 bucket，也没提 `model-trainer.json`，但 pipeline 的 training step 需要 `cheese-app-trainer.tar.gz`（先跑 `sh package-trainer.sh`）。另外 `python cli.py --model_deploy` 本身有 bug（name shadowing → `TypeError`）。
 - **做完马上删：** 每次 `deploy` 都会新建一个 Endpoint，`min_replica_count=1` 意味着没有流量也 24/7 计费。用 `gcloud ai endpoints undeploy-model` + `gcloud ai endpoints delete` 删掉所有 endpoint，再用 `gcloud ai models delete` 清理 Model Registry；bucket 里的文件可选删除。
+- **Lecture slides：** 老师的 Lecture 15 slides（42 页）和这份 guide 各节怎么对应、做 tutorial 需要的 10 个 lecture ideas，以及 slides 和今天 repo 不一样的 11 处，都在下面的 [Lecture slides](#lecture-slides)。最要紧的两处：① slide 37 写 Data Processor 会 "Convert to TF Records"，看起来数据一路流到 training；但在 `main` 上没有 TFRecords，training 自己从 GitHub 下载 dataset，`.after()` 只排顺序。② slides 16–17 列出的 autoscaling、model versioning、drift detection，这个 tutorial 一个都没开：endpoint 固定一台 node，没有流量也 24/7 计费，不会像 L14 的 Cloud Run 那样缩到 0。
 
 ## At a glance
 
@@ -36,6 +37,51 @@
   3. Optionally the bucket contents: the SavedModel, `raw.zip`, `clean.zip`, `model/`, `pipeline_root/`.
   4. Any stuck training job (Vertex AI → Training in the console).
 - **How to read the references.** Paths are written from the folder that holds your clones: `ml-workflow/src/workflow/cli.py:160` means line 160 of `src/workflow/cli.py` inside your `ml-workflow` clone. Paths into the Python SDKs are prefixed with the package name. The SDK behaviour described here was checked by reading (not running) the PyPI sources of the locked versions: `google-cloud-aiplatform==1.121.0`, `kfp==2.14.6`, `difPy==4.2.1` (locked in `model-deployment/uv.lock`, `ml-workflow/src/workflow/uv.lock` and `ml-workflow/src/data-processor/uv.lock`); the workflow container locks aiplatform 1.120.0, assumed to behave the same for the calls used. The old `origin/pipenv` branches (`model-deployment` @ `5e2281a`, 2024-10-29; `ml-workflow` @ `f8fd6a2`, 2025-04-01, when the trainer still read `tfrecords.zip` from the bucket; diffs in section 7) and the AWS variants `model-deployment-aws` / `ml-workflow-aws` are not covered. There are no Colab notebooks for L15.
+
+## Lecture slides
+
+The instructor's deck for this lecture is *Lecture 15: ML Workflows with Vertex AI*, 42 slides. Slide numbers are PDF page numbers. The slides are not reproduced here; what follows is in our own words. The full slide digest and the cross-check with the video live in the Explainer_Videos repo, in `videos/ac215-l15-vertex-ml-workflows/SLIDES.md`. Two README images are lecture diagrams: `model-deployment/images/serverless-model-deployment.png` is slide 12, and `ml-workflow/images/ml-pipeline.png` is the graph on slide 37.
+
+**Map**
+
+| This guide | Slides |
+|---|---|
+| At a glance; §7 Where this sits in the course | 6–8 (roadmap, the four Cheese App components, L14 recap), 10 (the Vertex AI console map), 19 |
+| §1 Part A diagram; checklist *Part A*; §4 A1–A7 | 12, 15 |
+| §1 Part B diagram; checklist *Part B*; §4 B1–B9 | 20–21, 34, 37–39 |
+| §2 costs; checklist *Clean up now* and *Final clean-up* | 11 (the cost alert), 41 |
+| §3.1 Serving signature; §5 excerpts 1–2 | 13–14 |
+| §3.2 Registry vs Endpoint | 11–12, 15–17 |
+| §3.3 Request format | 13 (the goal of raw bytes only; the format itself is tutorial-only) |
+| §3.5 Components; §4 B5; §5 excerpts 5–6 | 27–28, 34–36 |
+| §3.6 The pipeline DSL; §4 B10; §5 excerpts 7, 11–12 | 25–30, 34 |
+| §3.7 Submitting and running; §5 excerpts 8–10 | 30–33, 40 |
+| §3.4 Prebuilt containers, §3.8 Two identities, §6, §8, §9 | none (tutorial-only), except the local gcloud login in §3.8, which slide 36 shows |
+
+**Lecture ideas you need for this tutorial**
+1. Collector, processor and training already exist. This lecture adds Model Deploy, then automates all four (slides 6–7, 20–21).
+2. Serverless model deployment puts a trained model behind a managed endpoint (online or batch, CPU or GPU), and an online endpoint costs money for as long as it is up (slides 11, 41).
+3. Deployment takes five steps, all driven from one CLI container: get the saved model, update its signature, upload it to GCS, upload it to the Model Registry, deploy an endpoint (slides 12, 15).
+4. Put the preprocessing inside the model's serving signature so the endpoint accepts raw image bytes. Otherwise every client preprocesses a little differently ("client-side brittleness"), and one central copy is also easier to roll back (slides 13–14).
+5. Use Vertex AI Online Prediction to serve trained models, and Cloud Run when ML is one part of a larger application (slides 16–17).
+6. Workflow management runs the steps in dependency order and makes runs repeatable; it also covers scheduling, monitoring and resources (slides 19, 22).
+7. Vertex AI Pipelines is Kubeflow Pipelines, managed for you. You describe the steps in a Python DSL and set up no Kubernetes (slides 24–27).
+8. Writing a pipeline takes three moves: `@dsl.component` functions, a `@dsl.pipeline` that wires them by passing `.output`, and a compile to YAML. The SDK's `aip.PipelineJob(...).run()` then submits the YAML (slides 28–33).
+9. Your own step containers must be callable. One image opens a shell when given no arguments (development) and runs the CLI when given arguments (production). Push them to a registry Vertex can pull from, and describe the DAG (slides 34–36).
+10. The whole chain: DSL → compiler (YAML) → SDK → Kubeflow → Vertex AI Pipelines. Each container is a worker, and the DAG sets their order (slide 40).
+
+**Where the slides and today's tutorial differ** (in each case the repo, as verified here, is what runs today)
+- Slide 37 has the Data Processor "Convert to TF Records". On `main` it only dedupes and checks images and uploads `clean.zip`; `--prepare` is broken and out of the pipeline (§6 item 9).
+- Slides 19, 22 and 37 imply data flows from step to step. The edges are `.after()` ordering edges, and training downloads a fixed dataset from GitHub instead of reading `clean.zip` (§9 errata 2, Exercise E4).
+- Slides 12 and 15 make the signature update a deployment step. Part A does it in `--prepare`, and in the pipeline the trainer adds it as it saves; the deploy component only uploads and deploys, as slide 37's card says (the README's line 7 is wrong).
+- Slides 11, 16 and 17 promise serverless scaling. Both deploys pin one always-on node (`min_replica_count=1`, `max_replica_count=1`): it bills 24/7, never scales to zero, and each deploy makes a new endpoint (§2).
+- Slides 16–17 list versioning, A/B testing and drift detection. The tutorial uses none of them: `traffic_split={"0": 100}` on a fresh endpoint, and no monitoring job (Exercise E5 tries a split).
+- Slides 34 and 39 push images to Artifact Registry or Container Registry. The pipeline pulls public Docker Hub images (`dlops/cheese-app-*`) that are already pushed, Container Registry has been retired, and images must include amd64 (§4 B5).
+- Slide 35's Dockerfile (`python:3.9-slim-buster`, `ENTRYPOINT ["uv", "shell"]`) is a sketch. The real step images use `python:3.12-slim-bookworm` and `ENTRYPOINT ["/bin/bash","docker-entrypoint.sh"]`, and uv has no `shell` command.
+- Slide 36's development branch logs in to gcloud. The step images' entrypoints just activate the venv and open bash; on Vertex the pipeline's service account supplies credentials (§3.8).
+- Slide 33's import line is not valid Python, and its `job.run()` has no arguments. The repo uses `import google.cloud.aiplatform as aip`, calls `aip.init(...)` and runs `job.run(service_account=GCS_SERVICE_ACCOUNT)`, which is why you need Service Account User (§5 excerpt 8).
+- Slide 30 calls the SDK the chef who follows the recipe; slide 40 calls it the operator who sends it. Slide 40 is right: the SDK submits and polls, and Vertex runs the steps (§3.7).
+- Slides 22 and 24 promise reproducible runs. In this repo `packages_to_install` is unpinned, and the training step's `sync=False` can tick a failed training job and deploy the previous model (§6 items 10 and 19, Exercise E7).
 
 ## Command checklist
 

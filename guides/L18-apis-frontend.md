@@ -12,6 +12,7 @@
 - **最费时间的坑 1：** `gemini-2.0-flash-001` 已于 2026-06-01 retired，不 patch 的话所有 chat 都会失败。把三个 `api/utils/*.py` 里的 `GENERATIVE_MODEL` 改成 `gemini-3.1-flash-lite`（可能还要改 location），但千万不要单独改 RAG 的 `EMBEDDING_MODEL`。
 - **最费时间的坑 2：** 就算 RAG router 注释掉了，API 也必须先有 Chroma 才能启动（import 时就去连 server → `ValueError: Could not connect to a Chroma server`），所以先做 vector-db。另外：两个 container 要的 key 文件名不一样（`ml-workflow.json` vs `llm-service-account.json`）；`GCP_PROJECT="ac215-project"` 两处都要改；Linux 上先自己 `mkdir -p secrets persistent-folder`，否则是 root-owned；README 让你粘贴 `square_root`，但 v2 代码里已经有了；RAG 的第二条消息一定报 500（`llm_rag_chat.py:99`）。
 - **做完要删：** 云上不建任何资源，只按 Gemini call 计费。退出所有 container shell，`docker stop cheese-app-vector-db`（CLI 退出后 Chroma 还在跑），可选 `docker network rm cheese-app-network`，再 `docker system prune`。TensorFlow 的 image 有好几 GB，用 `docker image ls` 看看要不要删。
+- **Lecture slides：** 老师的 Lecture 18 有两份 slides（*APIs* 47 页、*Frontend* 42 页）。它们和这份 guide 各节怎么对应、做 tutorial 需要的 10 个 lecture ideas，以及 slides 和今天 repo 不一样的 9 处，都在下面的 [Lecture slides](#lecture-slides)。最要紧的两处：① slides 上的 route 写成 `@app.get("/newsletters")` 和 `/chat`，repo 里其实是 router + prefix：`/newsletters/`、`POST /llm/chats`（少了结尾的 `/` 会先收到一个 307）；② slide 上画了六个 route groups 和一个 MCP service，但 v2 只开了四个 router，RAG 要你自己取消注释，Agent 只是个 GET-only 的占位，MCP 根本没有实现。
 
 ## At a glance
 
@@ -51,6 +52,52 @@
 - **Colab notebooks:** none for L18.
 
 </details>
+
+## Lecture slides
+
+The instructor's slides for this lecture come as two decks: *Lecture 18: APIs* (47 slides) and *Lecture 18: Frontend* (42 slides). "APIs 34" below means slide 34 of the APIs deck, and "Frontend 24" means slide 24 of the Frontend deck. Slide numbers are PDF page numbers. The slides are not reproduced here; what follows is in our own words. The full slide digest and the cross-check with the planned video live in the Explainer_Videos repo, in `videos/ac215-l18-apis-frontend/SLIDES.md`. That file writes APIs *n* as A*n* and Frontend *n* as B*n*.
+
+**Map**
+
+| This guide | Slides |
+|---|---|
+| At a glance; §7 Where this sits in the course | APIs 4–5 and Frontend 4–5 (roadmap: "Build Cheese App", the Backend API first, then the Frontend); APIs 7–21 (the technical architecture: the cluster that L20–L22 build) |
+| §1 What you build (the diagram) | APIs 19 (ports 3000, 9000, 8000); APIs 34–41 = Frontend 7–14 (one request, hop by hop); Frontend 24–27 (the browser calls the API) |
+| §2 Folder layout and secrets | APIs 43 |
+| §3.1 REST; §3.2 FastAPI | APIs 25, 27–28, 33, 39 |
+| §3.3 uvicorn and `0.0.0.0` | APIs 26, 35–38 |
+| §3.5 Two meanings of localhost | APIs 24, 28 (one API in front of every store); APIs 37–38; Frontend 24–26 |
+| §3.7 Frontends | Frontend 16–27 (the simple frontend); Frontend 30–37 (why a framework; React; the header written once) |
+| Checklist *Part A*; §4 Part A (v1) | APIs 43, 34–41; Frontend 16–23 |
+| Checklist *Tutorial (23)*; §4 Part B (v2): B1 Vector DB, B2–B5 API | APIs 29, 44–45 |
+| Checklist *Tutorial (24)*, *Tutorial (25)*; §4 B6 Simple frontend; B7–B9 React | Frontend 18–28; Frontend 30–38 |
+| §5 Code tour | APIs 39 (a route); Frontend 24 (the axios call), 27 (the chat handler), 37 (the shared layout) |
+| §6 Gotchas | APIs 45 (the vector DB first: item 1) |
+| §3.4 CORS, §3.6 state, §3.8 dev loop, §8 Exercises, §9 Errata | none (tutorial-only) |
+| Not needed for this tutorial | APIs 22 (GCP / AWS / Azure building blocks), 30–33 (where agents sit; API vs MCP), 46 (team architecture exercise); Frontend 40–41 (app-building crash course and template repos) |
+
+**Lecture ideas you need for this tutorial**
+1. The project has moved from the ML pipeline to the app: a Backend API first, then a Frontend (APIs 4–5, Frontend 5).
+2. In this course "API" means a REST API: a Web API over HTTP that uses the methods GET, POST, PUT and DELETE, built with FastAPI (APIs 27–28).
+3. One API service is the front door. Every client speaks REST/JSON to it, and only it reaches the stores and models, which is why your browser never talks to Chroma or Gemini (APIs 24, 28).
+4. The screens decide the routes: the newsletters, podcasts and chat screens lead to the API's route groups (APIs 29, 44).
+5. Follow one request: browser → host port → port mapped into the container → FastAPI function → JSON back (APIs 34–41).
+6. The vector DB must be running before the API (APIs 45). In v2 the API does not even start without it (section 6, item 1).
+7. A simple frontend makes two round trips. The container on 8080 serves the HTML, then the page's JavaScript, running in your browser, calls the API on 9000 (Frontend 18–27).
+8. One HTML page per feature does not scale: nothing is reused and every page loads separately. So the course uses a component framework, React, in which the header is written once and only the content changes (Frontend 30–37).
+9. Secrets live outside the Git folder, next to the repo (APIs 43).
+10. In production only the outside changes, the address and the outer ports, not the FastAPI code or its port (APIs 42). The full blueprint puts NGINX in front of the app, API and vector DB containers (APIs 19).
+
+**Where the slides and today's tutorial differ** (in each case, follow the repos at the pinned commits)
+- The slides' handler is `@app.get("/newsletters")` in `service.py`. In v2 it is `@router.get("/")` in `api/routers/newsletter.py`, mounted under `/newsletters`, so the real URL ends in a slash and the simple frontend's call gets a 307 first (section 3.2, section 4 B6).
+- Frontend 27 says `/chat` (its code says `/chats`). The real chat routes are per model: `POST /llm/chats` to start a chat and `POST /llm/chats/{chat_id}` to continue it, and the same under `/llm-cnn` and `/llm-rag` (section 3.1).
+- APIs 44 shows six route groups, and APIs 30–33 an MCP service. v2 switches on four. RAG is one line to uncomment, and its second message fails (section 6, item 5). The Agent route is GET-only, so an Agent chat returns 404 or 405, and `fastmcp` is installed but unused (section 4 B5, section 9 item 5).
+- APIs 43's key file is `data-service.json`. v2 needs `ml-workflow.json` for the API and `llm-service-account.json` for the vector DB (section 2, section 6 item 2).
+- APIs 43's folder tree (ten services, including `ml-workflow` and `postgres-db`) is the whole project. v2's `src/` holds only `api-service`, `frontend-simple`, `frontend-react` and `vector-db`.
+- The tutorial links on APIs 45 and Frontend 28 and 38 use anchors (`#setup-environments`, `#frontend-app-simple`, `#frontend-app-react`) that the v2 README does not have. Use the [Links](#links) at the end of this guide.
+- The slides say React. The tutorial's app is Next.js 15 (App Router) running React 18: folders under `src/app/` are the pages, and `layout.jsx` holds the shared header (section 3.7).
+- APIs 37–42 label the inside of the container `localhost:9000`. uvicorn must listen on `0.0.0.0`, or the published port cannot reach it (section 3.3).
+- APIs 42 shows production as `https://…/api/newsletters`, with port 80 mapped straight into the API container. The course's code uses the path `/api-service` (`.env.production`), and in L20 an NGINX container on port 80 forwards it to the API on 9000 (section 7).
 
 ## Command checklist
 

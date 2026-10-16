@@ -12,6 +12,7 @@
 - **Idea 5 · 两种 IAM 身份：** invoker 决定谁能调用（"Allow public access" 经典做法是给 `allUsers` 加 `roles/run.invoker`）；runtime service account 是 container 出去调 Vertex AI 时的身份，由 metadata server 发 token，不需要 JSON key。两者互不影响。
 - **最费时间的坑：** ① function 的 "Function entry point" 必须和 `def` 名字一致：README 里是 `hello_http`，repo 的 `main.py` 是 `translate_http`，贴错就报 `File /workspace/main.py is expected to contain a function named ...`。② Job 显示 *Succeeded* 不代表成功：image 里写死的 `gemini-1.5-flash-001` 已下线，exception 被 `cli.py:51-52` 吞掉，一定要看 Logs，别看 status badge。（Apple Silicon 上自己 build image 要加 `--platform=linux/amd64`。）
 - **做完要删：** function、service、job；Artifact Registry 里 function build 自动生成的 repo/image（`cloud-run-source-deploy` 或 `gcf-artifacts`，做了 Step 11 还有你自己的 `ac215-images`）；Cloud Storage 里的 source bucket（`run-sources-…` 或 `gcf-v2-sources-…`）。README 没有 cleanup 这一节，照 §4 Step 12 做。
+- **Lecture slides：** 老师的 Lecture 14 slides（17 页）和这份 guide 各节怎么对应、做 tutorial 需要的 9 个 lecture ideas，以及 slides 和今天 README/repo 不一样的 5 处，都在下面的 [Lecture slides](#lecture-slides)。最要紧的两处：① slide 10 的 code sketch 用位置参数 `translate(text,src,dest)`，但 googletrans 的第二个参数是 `dest`，要像 README 一样写 `src=`/`dest=`；② "只为运行时间付费" 只在默认的 request-based billing + min instances 0 下成立，function build 留下的 image 和 source bucket 照样收费。
 
 ## At a glance
 
@@ -50,6 +51,42 @@
 - **Colab notebooks:** none for L14. **AWS variant:** "Coming Soon" (`tutorials_demo.md:194`).
 
 </details>
+
+## Lecture slides
+
+The instructor's deck for this lecture is *Lecture 14: Serverless Deployment: Cloud Functions, Cloud Run*, 17 slides. Slide numbers are PDF page numbers. The slides are not reproduced here; what follows is in our own words. The full slide digest and the cross-check with the video live in the Explainer_Videos repo, in `videos/ac215-l14-serverless-deployment/SLIDES.md`.
+
+**Map**
+
+| This guide | Slides |
+|---|---|
+| At a glance; §7 Where this sits in the course | 5 (Cheese App roadmap), 6 (the four components; "Model Deploy" is next), 9 (serverless across L13–L15) |
+| §1 What you build | 10 (one app, four deployment options) |
+| §3.1 Serverless, scale to zero; §3.3 billing | 8, 11, 14 |
+| §3.2 Cold starts | 16 |
+| §3.4 Functions vs services; checklist *Running App as Cloud Function*; §4 Steps 2–6 | 10–12 |
+| Checklist *Running App in Cloud Run*; §4 Steps 7–8 | 10 (cell 4), 14, 15 |
+| §3.8 Services vs jobs; checklist *Setup Cloud Run (Job + Service Account)*; §4 Step 10 | 14 (names *service* and *job* only) |
+| §6 Gotchas | 16 ("limited control and debugging") |
+| §2 clean-up, §3.5 container contract, §3.6 tags and digests, §3.7 IAM, §5 code tour, §8 exercises, §9 errata | none (tutorial-only) |
+
+**Lecture ideas you need for this tutorial**
+1. Your project has reached deployment. Of the four Cheese App components, the collector, processor and training are done, and "Model Deploy" is next (slides 5–6).
+2. Serverless means code runs only when it is needed and you set up no servers, so you pay for use, not for an idle machine (slide 8).
+3. Serverless is a family on GCP: the Vertex AI training job (L13), Cloud Functions and Cloud Run (today), then Vertex AI model deployment and pipelines (L15) (slide 9).
+4. The same app can be deployed four ways: as a code file or a container, on a VM or serverless. L1–L2 covered the two VM options. Path A is the serverless file, path B the serverless container (slide 10).
+5. A Cloud Function runs lightweight code with no server to manage. An event starts it (here, an HTTP request); you pay for the time it runs; it scales on its own (slide 11).
+6. Deploying a function takes four steps: open the Functions page, enable the APIs, write the code, deploy (slide 12).
+7. Cloud Run runs a whole container you bring, either as a *service* (path B) or as a *job* (path C) (slide 14).
+8. Deploying to Cloud Run takes three steps: open the Cloud Run page, enable the APIs, deploy a Docker image (slide 15).
+9. Serverless has three downsides: vendor lock-in, cold starts after idle time, and limited control when debugging (slide 16).
+
+**Where the slides and today's tutorial differ** (in each case, use the README and repo at `4eaf343`)
+- The slides say "Cloud Function(s)" at `console.cloud.google.com/functions`. The product is now *Cloud Run functions*, under Cloud Run (README.md:8), and that link redirects there. Your URL ends in `run.app` (§4 Step 6).
+- Slide 10 draws a function as a bare `main.py`, and slide 11 says there are no containers to manage. In fact Cloud Build turns your source into a container image in Artifact Registry, which you delete afterwards (§3.4, §2).
+- Slide 10's sketch calls `translator.translate(text,src,dest)` positionally and ends with `return = results.text`. googletrans orders the arguments `translate(text, dest, src)`, so pass `src=` and `dest=` by name, as README.md:57 and `main.py:25` do.
+- Slides 11 and 14 say you pay only while code runs. That holds for compute with request-based billing and min instances 0, the defaults. Cloud Build minutes, Artifact Registry images and source buckets cost money anyway (§2, §4 Step 12).
+- Slide 12's "Create a python code file" is shorthand. The console needs `main.py`, `requirements.txt` and a Function entry point equal to the `def` name, `hello_http` (§4 Steps 3–5, §6 #5).
 
 ## Command checklist
 
