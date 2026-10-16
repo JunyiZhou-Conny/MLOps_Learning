@@ -52,6 +52,54 @@
 
 </details>
 
+## Lecture slides
+
+The instructor's deck for this lecture is *Lecture 21: Automating Software Development: CI/CD with GitHub Actions and other tools II*, 35 slides. Slide numbers are PDF page numbers; from slide 16 on, the numbers printed in the slide footers run ahead of them. The slides are not reproduced here; what follows is in our own words. The full slide digest and the cross-check with the planned video live in the Explainer_Videos repo, in `videos/ac215-l21-cicd-github-actions/SLIDES.md`. After a two-slide recap of L09's local hooks, the deck has four parts: remote Git hooks (4–7), GitHub webhooks (8–12), continuous integration (13–31) and continuous deployment, which it postpones (32–34).
+
+**Map**
+
+| This guide | Slides |
+|---|---|
+| At a glance; §7 Where this sits in the course | 2–3, 14–16 (L09's local hooks run only on your machine; CI runs the checks on the shared repository); 33–34 (CD comes later: L23) |
+| §1 What you build (the diagram) | 26–27 (the five-stage pipeline); 21 (the CI loop) |
+| §2 Prerequisites and costs (Actions minutes) | 24 (how often to run CI vs what it costs) |
+| §3.1 Workflow anatomy; §4 Step 5 (triggers) | 22, 25 (CI defined; GitHub Actions on push or pull request); 23 (each merge is tested) |
+| §3.2 Runners; §3.3 Build once | 16, 26–27 (Build Container comes first) |
+| §3.4 The job graph | 26–27 (drawn as a straight line; the real graph fans out) |
+| §3.5 Exit codes, Black and Flake8 | 14, 22, 27 |
+| §3.6 Test altitudes | 27 |
+| §3.7 Outputs and summaries | 16, 27 (Summary) |
+| §3.8 Secrets; §4 Step 15 Slack | 7, 9–12 (webhooks; slide 11's imagined Slack message) |
+| Checklist Parts 1–4; §4 Steps 1–4 (L09 context) | 2, 14 (local hooks) |
+| Checklist Part 5; §4 Steps 12–14 (push, watch, turn green) | 21 (the loop: fix and push again); 28 (link to README Part 5) |
+| Checklist Part 6; §4 Step 16 (branch protection) | 5–6 (`pre-receive` and `update`: rules enforced on the server) |
+| §8 E8 (what CI actually checks) | 29–31 (`--no-verify`) |
+| §5 Code tour, §6 Gotchas, §9 Errata | none (tutorial-only) |
+| Background, not needed to finish the tutorial | 17–20 (non-determinism in ML, and four remedies: version everything, automate retraining and testing, monitor in production, controlled deployment); the ML half of 23 |
+
+**Lecture ideas you need for this tutorial**
+1. Local Git hooks run only where someone ran `pre-commit install`, and they stop at the push, so a team cannot rely on them (2–3, 14–15).
+2. `git commit --no-verify` skips every local pre-commit check; whatever slips through can only be caught on the shared repository (29–31).
+3. CI runs a series of scripts automatically whenever the code changes: integrate, test, enforce coding standards, run static analysis (16, 22, 25).
+4. The CI loop: developers commit, the code is built and tested, the results go back to the developers, who fix and commit again (21). Your red → green run in §4 Steps 13–14 is one turn of it.
+5. The course pipeline: a commit triggers it; build the container first, so every check runs in one environment; then Black and Flake8; then unit, integration and system tests; then a pass/fail summary (26–27).
+6. Each merge into the shared repository should trigger the tests (23). On a pull request, this workflow tests the merge commit (§4 Step 5).
+7. Server-side hooks enforce rules where code is received: `pre-receive` can refuse a push, `post-receive` runs after it is in (5–6). A push-triggered Actions run is the second kind; branch protection (Part 6) is the gate that refuses.
+8. Webhooks carry repository events to outside services such as Slack, Jenkins or a deploy server (7, 9–12). This repo's Slack step works the other way round: your workflow calls a Slack incoming-webhook URL.
+9. Running CI more often catches problems sooner but costs compute, so the setup depends on your resources (23–24). Here that means the branch filter, parallel jobs, and about 6 billed minutes per run on a private repo (§2).
+10. CD automates the release once everything is tested and approved; it comes later, in L23 (33–34).
+
+**Where the slides and today's tutorial differ** (in each case, follow the repo at `b8458ff`)
+- Slide 2 says `pre-commit` runs before code is accepted on the server. It runs on your machine before each commit is created (README Part 4); "before the server accepts it" is `pre-receive` (slide 5).
+- Slide 5 lists GitHub Actions as a remote hook that enforces rules. A push-triggered run starts after the push has been accepted and cannot refuse it; on GitHub.com the gate that refuses is branch protection with required checks (§4 Step 16).
+- Slide 14's local chain is linters → formatters → tests. This repo's hooks run seven hygiene checks, then Black (format), then Flake8 (lint), and no tests; CI also runs Black first, and Flake8 is skipped when Black fails (§3.5).
+- Slide 25 says the pipeline runs on every push or pull request. Only pushes to `main`/`develop` and PRs into them start a run; a feature-branch push runs nothing (§4 Step 5, §6 G2).
+- Slides 26–27 draw one straight line ending in a Summary that reports pass/fail. After `build`, four jobs run in parallel, and `test-summary` reads only the three test jobs, so when Black fails the run is red while the summary says "✅ All tests passed!" (§3.4, §6 G10).
+- Slides 9–12 have a GitHub webhook post to Slack on every push. No repository webhook exists: the last steps of `test-summary` call the Slack incoming-webhook URL stored as the secret `SLACK_WEBHOOK_URL`, only when it is set, and never when tests fail (§3.8, §6 G8).
+- Slide 11's imagined message shows the failed step (`pre-commit run --all-files`), test and lint counts and the duration. The real message has repository, branch, commit, author, ✅/❌ for each test job and two links; this CI never runs pre-commit and reports nothing about lint (§4 Step 15).
+- Slides 29–31 say the remote CI runs the checks again. Here it re-runs only Black and Flake8, on `api/`; the hygiene hooks, `detect-private-key` included, never run in CI, so a key file committed with `--no-verify` passes (§8 E8). A CI step running `pre-commit run --all-files` closes the gap.
+- Slide 28's link ends in `#part-5-github-actions-remote-cicd`, the anchor of an old heading; the current one is `#part-5-github-actions-remote-ci` (see [Links](#links)).
+
 ## Command checklist
 
 Commands in backticks are exactly as the README writes them (placeholders kept). Plain items are browser steps or edits. Items marked *(extra)* are not in the README; they come from §4 of this guide. Run everything from the repo root unless an item says "inside the container". Parts 1-4 are context from L09; Part 5 is this lecture.
