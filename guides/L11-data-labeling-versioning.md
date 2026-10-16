@@ -84,11 +84,11 @@ The instructor's deck for this lecture is *Lecture 11: Data Labeling, Versioning
 | §3.7 gcsfuse and the bind mount; §5 `docker-entrypoint.sh` | 21, 27–34 |
 | §3.8 One key, many consumers; §5 `docker-shell*.sh` | 11, 13, 29, 34 |
 | §7 Where this sits in the course | 8–12 (L03, L04, L10 recalled), 35–36 (choosing a tool for your project) |
-| §2, §6, §8, §9 | none (tutorial-only) |
-| not in this guide | 15–18 (labeling platforms, curation), 21–22 (bucket vs data lake, table formats), 24 (the renamed-copies anti-pattern), 38–40 (monitoring) |
+| §2, §6, §8, §9 | none (tutorial-only); slides 38–40 settle §9's open question on monitoring |
+| not in this guide | 15–18 (labeling platforms, curation), 21–22 (the data-lake and table-format ideas themselves), 24 (the renamed-copies anti-pattern), 38–40 (monitoring) |
 
 **Lecture ideas you need for this tutorial**
-1. Labels are the ground truth a model learns from and is graded on. Consistent labels matter as much as correct ones, and labeling the model's mistakes and edge cases makes the next dataset version (slide 4).
+1. Labels are the ground truth a model learns from and is graded on. Labels must be consistent as well as correct, and labeling the model's mistakes and edge cases makes the next dataset version (slide 4).
 2. Use a labeling tool, because labeling by hand is slow and inconsistent; running Label Studio in your own container keeps outside labeling services away from your data (slides 5, 7).
 3. The labeling station reuses three earlier ideas: a Docker network lets containers talk, credentials control access to cloud storage, and Compose runs related containers together (slides 8–12).
 4. The station is two containers: Label Studio (port 8080, a mounted data folder) and a CLI container (source code mounted, you shell in to run `cli.py`). Both get the secrets folder and `GOOGLE_APPLICATION_CREDENTIALS` (slide 13).
@@ -97,13 +97,13 @@ The instructor's deck for this lecture is *Lecture 11: Data Labeling, Versioning
 7. A bucket only stores named objects. A data lake is the same bucket plus tools to add, find, control, prepare and version the data (slide 21).
 8. An old version can be read only while its files are kept. Here that means: keep `dvc_store/` (slide 22, "time travel").
 9. gcsfuse mounts the bucket at `/mnt/gcs_data`, and a bind mount re-exposes its `images/` folder at `/app/cheese_dataset`, where DVC works on it like a local folder. The mount command has four parts: the tool, the key file, the bucket name (unique across GCP) and the mount point (slides 27–34).
-10. Monitoring, with no tutorial: watch quality, freshness, drift (such as many more images of one cheese), cost, and which step failed. Use fixed rules when expectations are known, learned baselines when they are not, and lineage for the rest (slides 38–39).
+10. Monitoring, with no tutorial: watch quality, freshness, drift (such as many more images of one cheese), cost, and which step failed. The three approaches are rule checks when the schema and expectations are predefined, ML anomaly detection on baseline metrics, and lineage plus metadata for all other cases (slides 38–39).
 
 **Where the slides and today's tutorial differ** (in each case the repos, as verified here, are what runs today)
 - Slide 6 ends in "Colab {training}". L11 trains nothing: the notebook only runs `dvc list`/`dvc get --rev` and counts files, Part B versions a different bucket's unlabeled `images/`, and L13 trains on a GitHub-release zip (§1 note, Exercise E7).
 - Slide 6 draws the labeled set as photos sorted by cheese. Label Studio writes one JSON annotation per label into `cheeses_labeled/`, and the photos never move (§3.1).
 - Slide 7 says nothing gets uploaded externally. The photos are in your own GCS bucket, and the browser downloads them from Google with pre-signed URLs, which is why CORS is needed (§3.2–3.3).
-- Slide 13 links the browser only to Label Studio and draws no line between the containers. The browser also fetches images straight from GCS, and `cli.py -p/-t` call `http://data-label-studio:8080` over `data-labeling-network` (§3.4).
+- Slide 13 links the browser only to Label Studio and draws no direct line between the containers. The browser also fetches images straight from GCS, and `cli.py -p/-t` call `http://data-label-studio:8080` over `data-labeling-network` (§3.4).
 - Slides 6, 13, 14 and 26 use other names: one "Data Labeling Container" is really `data-label-studio` plus `data-label-cli`; `docker-volume/label-studio` is `docker-volumes/label-studio`; "expose port 8080" is publishing with `-p 8080:8080`; the "Data Versioning Container" is `data-version-cli`.
 - Slides 16–18 write a bucket path as `gcs://…`. Real bucket URIs start with `gs://`, as in `dvc remote add -d cheese_dataset gs://YOUR_BUCKET_NAME/dvc_store`.
 - Slide 25 says Git records each file's fingerprint. Git holds `cheese_dataset.dvc`, whose one md5 is the fingerprint of a `.dir` manifest; the manifest with the per-file md5s lives in `.dvc/cache` and `dvc_store/` (§3.5–3.6).

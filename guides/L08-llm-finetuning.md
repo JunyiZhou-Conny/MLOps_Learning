@@ -98,7 +98,7 @@ Lecture-only: multi-task fine-tuning (10), the GPT-4 training-cost aside (11–1
 
 **Lecture ideas you need for this tutorial**
 1. Fine-tuning usually means instruction fine-tuning: training on pairs of an instruction and its answer, sometimes with context. The tutorial's `instruct-dataset.csv` is the two-field case (slides 4–5).
-2. Tuning leaves habits you can see: a chat-tuned model opens with "Sure, here's…", where a plain next-word model would just continue the text. The Pavlos openers are this on purpose (slides 7–8).
+2. Tuning leaves habits you can see: a chat-tuned model opens with "Sure, here's…", where plain next-word prediction, the slides argue, would give just the haiku. The Pavlos openers are this on purpose (slides 7–8).
 3. Full fine-tuning of a 10B model in FP16 needs about 120 GB: 20 GB of weights, 20 GB of gradients and 80 GB of FP32 Adam states (slides 13–15).
 4. LoRA freezes W₀ and learns ΔW = (α/r)·B·A in a branch beside it. B starts at zero, so training starts from the pretrained model. Here r = 8 and α = 16 (slides 22, 26–28).
 5. A low-rank pair has far fewer numbers than the matrix it updates, and only the pair trains. The slides' table treats a model as one layer; the notebook's exact count is 1,146,880 (slides 23–25, 31–35).
@@ -109,12 +109,12 @@ Lecture-only: multi-task fine-tuning (10), the GPT-4 training-cost aside (11–1
 10. QLoRA stores W in NF4, dequantizes it to 16 bits for each matrix multiply, trains only the adapters, and can merge them into the weights at the end. A 10B model drops to about 12 GB (slides 30, 68–72).
 
 **Where the slides and the tutorial differ** (in each case, the notebook's stored run and PEFT 0.20.0 show what the code does)
-- Slides 66–72 compute in BF16 with BF16 adapters. The notebook computes in FP16 (`bnb_4bit_compute_dtype="float16"`, `fp16=True`) so that T4s work, and casts the adapters to FP32 (nb cells 31, 34, 70, 72; §3.7).
+- Slides 66–70 and 72 compute in BF16 with BF16 adapters. The notebook computes in FP16 (`bnb_4bit_compute_dtype="float16"`, `fp16=True`) so that T4s work, and casts the adapters to FP32 (nb cells 31, 34, 70, 72; §3.7).
 - Slide 53 skips double quantization. The notebook turns it on with `bnb_4bit_use_double_quant=True` (§3.5).
 - Slides 27–30 draw A from a normal distribution. PEFT's default draws A from a Kaiming-uniform distribution (`"gaussian"` is opt-in). B = 0 in both, so the update still starts at zero (§3.6).
 - Slides 22 and 41 add adapters "to each layer". PEFT's Qwen3 default adapts only `q_proj` and `v_proj` in each of the 28 layers (§3.6; E1 for `all-linear`).
 - Slides 45–51 use one absmax constant for a whole array and round to Int8. bitsandbytes uses one constant per small block and 16 NF4 levels (§3.5).
-- Slides 29 and 70 say the backward pass doesn't use the pretrained weights. W₀ gets no gradient and no update, but gradients still pass through it to earlier layers (§3.7).
+- Slide 29 says the backward pass doesn't use the pretrained weights, and slides 29 and 70 say gradients flow only through the adapters. W₀ gets no gradient and no update, but gradients still pass through it to earlier layers (§3.7).
 - Slide 30 merges the update into the weights. The notebook merges into a freshly loaded FP16 base, not the 4-bit one, and recommends keeping the 4.6 MB adapter (nb cells 83–86; §4 Step 26).
 - Slide 25 says a higher rank gives better performance. Poll 3 (nb cell 68) adds the cost: more trainable parameters and slower training, for "potentially" better results (§3.6).
 

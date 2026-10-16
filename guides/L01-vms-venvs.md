@@ -61,7 +61,7 @@ The instructor's slides for this lecture are two decks: *Lecture 1: Virtual Envi
 
 | This guide | Slides |
 |---|---|
-| At a glance; §1 What you build | 33–34, 49 (the three tools: VMs, virtual environments, and containers next week); 39–40, 72 (the two tutorial checklists) |
+| At a glance; §1 What you build | 33–34, 49 (the three tools: VMs, virtual environments, and containers next week); 39 (why a translation app); 40, 72 (the two tutorial checklists) |
 | §2 Prerequisites and costs | 41–42 (Google Cloud; a personal account); costs and deleting: none (tutorial-only) |
 | Command checklist; §4 Part A (Steps 0–9) | 40–48 (the console path, "Select all defaults", SSH, `git clone`) |
 | §3.1 Virtual machine | 35–38, 73 |
@@ -76,14 +76,14 @@ The instructor's slides for this lecture are two decks: *Lecture 1: Virtual Envi
 | §7 Where this sits in the course | 4–17 (MLOps, the tech stack, "Our Stack"), 19–27 (the Cheese App), 33–34, 49 (containers next week); intro 10–18 |
 
 **Lecture ideas you need for this tutorial**
-1. Teams hit "it works on my machine": each stage and each person runs a different OS and Python setup. The fix is isolated environments that can be shared, a common OS whatever the host, and tracked installs (slides 7, 28–32).
+1. Teams hit "it works on my machine": the stages of a project and the people on it use different OSs and Python setups. The fix is isolated environments that can be shared, a common OS whatever the host, and tracked installs (slides 7, 28–32).
 2. A VM is a computer made of software: a hypervisor creates and runs it on the host, and each guest has its own OS, which can differ from the others (slide 36).
 3. VMs are safe and autonomous (software inside can't harm the host), but large, slower and slow to start; containers come next week (slides 33, 37–38).
 4. The VM tutorial is: console → Compute Engine → VM instances → Create instance → defaults → SSH → `git clone`. Use a personal account, not one tied to a university or employer domain (slides 40–48, 42).
 5. A venv is a directory: a site-packages folder for third-party libraries, links to a real interpreter, and scripts (`activate`) that make your shell use them (slide 50).
 6. One base install means one version of each library for every project. A per-project environment, shared as a file, lets a teammate rebuild it exactly (slides 51–54).
 7. Venvs make dependencies explicit and results reproducible, but they isolate only Python packages and may behave differently across operating systems (slides 55–56, 73).
-8. There are five tools: venv, conda, pipenv, mamba and uv. Each records the environment in a file (`requirements.txt`, `environment.yml`, `Pipfile` + `Pipfile.lock`), and the course uses uv (slides 57–64).
+8. There are five tools: venv, conda, pipenv, mamba and uv. venv, conda and pipenv record the environment in a file (`requirements.txt`, `environment.yml`, `Pipfile` + `Pipfile.lock`), and the course uses uv (slides 57–64).
 9. uv has two key files and a key directory: `pyproject.toml` (what the project needs, human-edited), `uv.lock` (the exact versions) and `.venv/` (the installed environment) (slides 65–66, 68).
 10. Start a project with `uv init --bare` and `uv add`; join one with `uv sync`; run code after activation or with `uv run` (slides 67, 69–70).
 
@@ -94,7 +94,7 @@ The instructor's slides for this lecture are two decks: *Lecture 1: Virtual Envi
 4. Slide 70 says `uv sync` installs the exact versions from `uv.lock`. This repo commits no `uv.lock`, so your first `uv sync` resolves afresh and writes one (§9, erratum 1).
 5. Slides 40 and 72 say "Install dependencies: git, Python". Python is already on the image: walkthrough A installs pip, and walkthrough B installs uv, whose `uv sync` brings its own Python if needed (Steps 6, 15, 17).
 6. Slide 46 says "Select all defaults"; this guide suggests e2-small and Debian 12. Both work, and the boot image decides whether uv downloads a Python (Debian 12) or uses the system's (Debian 13) (Step 1, §3.6).
-7. Slide 48's SSH screenshot comes from an older Debian image (a 2021-era kernel, read from a small render). Your banner says Debian 12 or 13, where pip refuses system installs without `--break-system-packages` (§3.2).
+7. Slide 48's SSH screenshot comes from an older Debian image (a 2021-era kernel, read from a small render). On this guide's images, Debian 12 or 13, pip refuses system installs without `--break-system-packages` (§3.2).
 8. The links on slides 40 and 72 use anchors that don't match the README's headings (the second ends in `-t2`), so they most likely open the README at the top; use this guide's Links (§9, erratum 8).
 9. Slide 60 installs with `pip` inside a venv, and slide 65 calls uv a "drop-in replacement for pip". That holds for `python3 -m venv`, but a uv venv has no pip: use `uv add` (or `uv pip install`) (§6 #10).
 10. Slide 64 installs pipenv with `pip install pipenv`. On the walkthrough VMs the system pip refuses (A) or doesn't exist (B); the pipenv branch's README uses `sudo apt install pipenv` (Step 22).
