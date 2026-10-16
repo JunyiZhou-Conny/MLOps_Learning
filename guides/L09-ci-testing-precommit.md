@@ -14,6 +14,7 @@
 - **最费时间的坑：** ① code 和 tests 是 `COPY` 进 image 的，没有 volume mount：改了 `utils.py` 或 test 不 rebuild（`docker build -t cheese-app-api:local .`）就什么都不变（G1）。② fresh clone 上 `black --check --line-length 120 api/` 直接 fail：`utils.py` 是故意留脏的（G23），不是你 Part 7 的 `/add/` 代码有问题。
 - **README 的几个 errata：** README:442 的 auto-format 命令把 `src/api-service` mount 到 `/app`，盖掉了 `docker-entrypoint.sh`，必报 `No such file or directory`（E1、G2）；`/euclidean_distance/` 返回的是 JSON object，不是 `5.0`；"What Gets Checked?" 只列了 5 个 hook，config 里其实有 9 个；Part 6 的 `def broken(): assert False` 不会让任何 test 变红（只有 `test_*` 会被 collect）；Option 3 说"另开一个 terminal 起 server"，会和 `docker-shell.sh` 抢 9000 端口。
 - **做完要删：** `docker stop api-server && docker rm api-server`，然后 `docker container ls`、`docker system prune`、`docker image ls`（`cheese-app-api:local`、`cheese-app-api-service` 这种有 tag 的 image 要自己 `docker image rm`）；`pre-commit uninstall` 加 `pre-commit clean`（删 `~/.cache/pre-commit/`）；babykev 的 `.venv`（CPU torch，几百 MB）、`~/.cache/huggingface` 里的 Qwen2.5-0.5B（约 1 GB）、step-05b 的 images（`just image stop` 再 `docker image rm`）。
+- **Lecture slides：** 老师给的 Lecture 9 slides 是 Rahul Dave 的 guest lecture《Software Development for Machine Learning》（100 页），讲的是 babykev（Track B），不是 cheese app：cheese repo 只在 slide 9 出现一次（QR code）。这份 guide 各节和 slides 怎么对应、做 tutorial 需要的 10 个 lecture ideas，以及 slides 和今天两个 repo 不一样的 11 处，都在下面的 [Lecture slides](#lecture-slides)。最要紧的两处：① babykev 的 hook 跑 `just check`（format check、lint、全部 hermetic tests、90% coverage floor），而且只检查、不改文件；cheese 的 hook 不跑 test，black 会直接改写 staged file，commit 被拦下后要 `git diff` → `git add -u` → 再 commit。② babykev 把需要网络的 test 标成 `system` marker，默认不跑，要跑就必须 pass；cheese 的 system tests 用 `skipif`，server 不在就 skip，整个 run 照样是绿的。
 
 ## At a glance
 
@@ -53,6 +54,58 @@
 - **Ed lesson:** its text was not readable when these sources were checked; the repos and the course site were used instead.
 
 </details>
+
+## Lecture slides
+
+The instructor's deck for this lecture is Rahul Dave's guest lecture *Software Development for Machine Learning* (`babykev`), 100 slides. Slide numbers are PDF page numbers, and the footers print the same numbers. The slides are not reproduced here; what follows is in our own words. The full slide digest and the cross-check with the planned video live in the Explainer_Videos repo, in `videos/ac215-l09-ci-testing/SLIDES.md`. The deck walks **Track B**, the `babykev` project, in nine parts, one per git tag `step-00` … `step-05b`. The cheese tutorial (**Track A**) appears only on slide 9, as a QR code, so its ideas reach Track A as the same idea shown on a different project.
+
+**Map**
+
+| This guide | Slides |
+|---|---|
+| At a glance; §1 What you build | 7–9 (the plan, babykev, the cheese app as "the second example"); 41, 98–99 (the gate) |
+| §2 Prerequisites (guest lecture) | 12 (you install uv, just and Quarto; the lockfile brings the rest) |
+| §3.1 The testing pyramid | 25, 62 (a unit and an integration test); 65–68 (hermetic, kinds of tests, smoke); 95 (the kinds again, and which can run on every commit) |
+| §3.2 pytest mechanics | 25–27 (asserts, `-k`, built-in fixtures, `parametrize`, `pytest.approx`); 58–61 (writing fixtures, `conftest.py`, scope); 95 (markers) |
+| §3.3 Hermetic vs environment-dependent | 65, 94–97 |
+| §3.4 Formatter vs linter | 29–31, 33, 50, 93 |
+| §3.5 Git hooks and pre-commit | 34, 41–44 |
+| §3.6 Coverage is not correctness | 25, 35 (coverage on every run, the 90% floor); 72–83 (all green and wrong; properties; hypothesis; the fix) |
+| §3.7 One environment, one command | 14–20 (uv, the lockfile, just recipes); 32 (dependency groups); 35; 87–92 (dev and run images) |
+| §3.8 What belongs where | 44 (other hook moments), 94, 97–98 |
+| §4 Track A; checklist Parts 1–7 (the cheese app) | 9 only; the ideas come in through §3 |
+| §4 B2–B9; checklist *the walk, step by step* | step-00: 12–20 · step-01: 21–27 · step-02: 28–32 · step-03: 33–44 · steps 04/04b: 45–52 · step-05: 53–75 · step-05a: 76–86 · step-05b: 87–100 |
+| §5 Code tour, the babykev excerpts | 43 (`.pre-commit-config.yaml`); 35, 86 (`check`); 80–81 (`test_mask.py`); 58–60, 77 (`conftest.py`); 95, 97 (the pytest options) |
+| §6 G16–G18 | 43 (`language: system`); 15, 39 (the lockfile); 80 (hypothesis's deadline). The other gotchas are tutorial-only. |
+| §7 Where this sits in the course | 9; 13 (`serve.py` waits for the CI/CD class, L21) |
+| §8 Exercises 8.6–8.8 | 94–98; 58–60; 79–81 |
+
+Background, not needed to finish the tutorial: 1–6 (an ML project is mostly engineering; the ML code is a small box), 10–11 and 53–57 (what babykev's model does), 45–52 (documentation as a check), 69–71 and 85 (the type checker ty), 100 (the docs on GitHub Pages).
+
+**Lecture ideas you need for this tutorial**
+1. A gate is anything that can fail and stop a commit; the hook makes it automatic, and a commit that fails the check never happens (41, 98–99).
+2. Name a test's kind by what runs in it: unit, integration (our parts, with stand-ins for what comes from outside), end-to-end or system (the real parts), smoke, acceptance. The file or folder name doesn't decide (66, 95).
+3. A test is hermetic when only our code can make it fail. Only hermetic checks belong in the hook, and you prove it by running them with the network switched off (65, 94, 97).
+4. A test that needs the outside world gets a marker (`system`), stays out of the default run, and is run on request, where it must pass instead of skipping (95, 97).
+5. Test normal inputs, edge cases and invalid inputs. When a good test fails, fix the code, not the test (25, 27–28).
+6. A fixture is a named argument that pytest builds and passes in; shared ones live in `conftest.py`, and the scope decides whether it is built once or fresh for each test. `parametrize` turns one function into several tests (26, 58–61).
+7. A formatter rewrites the layout and never changes behaviour; a linter reports. Tools fix most findings, a person fixes the rest (29–31, 33).
+8. `pre-commit install` writes a machine-specific `.git/hooks/pre-commit` that only hands over to pre-commit. It is never committed, so every clone installs its own (34, 44).
+9. One command for people, agents, the hook and CI, so that they all check the same thing (16, 20, 35, 41).
+10. All green can still be wrong: coverage counts the lines that ran, not what was checked. State the rule as a property and let hypothesis look for the failing case (73–74, 78–81).
+
+**Where the slides and today's tutorial differ** (for the cheese tutorial, follow the repo at `b8458ff`; for the walk, the `babykev` tags)
+- Slides 29–31 and 50 use ruff for formatting and linting, with one line length of 100 set in `pyproject.toml`. The cheese repo uses Black 24.1.1 and Flake8 7.0.0 at 120, passed on each command; README commands without a width get 88 and 79 (§3.4, §9 E5).
+- Slides 35, 41 and 43: babykev's hook runs `just check`, which includes every hermetic test over a 90% coverage floor. The cheese hook runs seven hygiene hooks, Black and Flake8, and no tests (§3.8, §9 E4).
+- Slides 29 and 35: babykev's gate only checks the format (`just fmt --check`), so the hook never edits a file. The cheese Black, trailing-whitespace and end-of-file-fixer hooks rewrite the staged file and abort the commit; `git diff`, `git add -u`, commit again (§6 G11).
+- Slide 43 pins `pre-commit-hooks` at `v6.0.0` and checks the whole project on every commit. The cheese config pins `v4.5.0`, and Black and Flake8 see only staged files under `src/`, so `tests/` is never linted (§5, §6 G15).
+- Slides 66 and 95 define integration as our parts with stand-ins (hermetic) and system as the real parts, whatever the folder. The README's "Testing Pyramid" agrees, but `test_system_api.py` calls the system tests "Integration tests" and `pytest.ini:22` says integration tests need running services (§3.1, §9 E11).
+- Slides 95 and 97 mark the non-hermetic test `system` and select it on purpose. The cheese system tests use `skipif` and silently skip when no server answers (§3.3, §6 G3).
+- Slides 14–15, 32 and 87–91: one `uv.lock`, developer tools in dependency groups, a run image built in stages without them, Python 3.13. The cheese repo has no lockfile, ships Black, Flake8, pre-commit and pytest in its one image, calls its single-`FROM` Dockerfile "Multi-stage", and uses Python 3.11 (§3.7, §9 E14, E20).
+- Slides 16, 20 and 41: one command for people, the hook and CI. In the cheese repo the hook's pinned Black, the image's newest `black>=24.1.1` and the README's width-less commands are three different checks (§6 G9, G14).
+- Slide 35 fails the gate below 90% coverage. The cheese repo measures coverage for the unit tests only and sets no floor; Milestone 5 asks for 70% (§3.6).
+- The cheese files cite "L17, Slide …" and "L18, Slide …" (`.pre-commit-config.yaml:2`, `:28`, `:37`; `pytest.ini:2`; `test_api.py:4`), a previous year's decks. In this deck pre-commit is slides 34 and 41–44, the formatter 29, the linter 30 (§9 E12).
+- Slide 32, a step-02 slide, shows the final dependency groups. At the `step-02` tag they hold only pytest, pytest-cov and ruff; the other tools arrive at `step-03`, `step-05` and `step-05b`.
 
 ## Command checklist
 

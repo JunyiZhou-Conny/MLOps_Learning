@@ -91,7 +91,7 @@ The instructor's deck for this lecture is *Lecture 21: Automating Software Devel
 
 **Where the slides and today's tutorial differ** (in each case, follow the repo at `b8458ff`)
 - Slide 2 says `pre-commit` runs before code is accepted on the server. It runs on your machine before each commit is created (README Part 4); "before the server accepts it" is `pre-receive` (slide 5).
-- Slide 5 lists GitHub Actions as a remote hook that enforces rules. A push-triggered run starts after the push has been accepted and cannot refuse it; on GitHub.com the gate that refuses is branch protection with required checks (§4 Step 16).
+- Slide 5 names GitHub Actions as one of the servers where remote hooks run and enforce rules. A push-triggered run starts after the push has been accepted and cannot refuse it; on GitHub.com the gate that refuses is branch protection with required checks (§4 Step 16).
 - Slide 14's local chain is linters → formatters → tests. This repo's hooks run seven hygiene checks, then Black (format), then Flake8 (lint), and no tests; CI also runs Black first, and Flake8 is skipped when Black fails (§3.5).
 - Slide 25 says the pipeline runs on every push or pull request. Only pushes to `main`/`develop` and PRs into them start a run; a feature-branch push runs nothing (§4 Step 5, §6 G2).
 - Slides 26–27 draw one straight line ending in a Summary that reports pass/fail. After `build`, four jobs run in parallel, and `test-summary` reads only the three test jobs, so when Black fails the run is red while the summary says "✅ All tests passed!" (§3.4, §6 G10).

@@ -13,6 +13,7 @@
 - **最费时间的坑：** ① 装完 uv 马上 `uv: command not found`：要 `source $HOME/.local/bin/env`，或者开一个新的 SSH 窗口。② 一长串红色 traceback 只看最后一行会被骗：`cli.py:32-37` 把所有 exception 都包成"network/IP"的 `RuntimeError`，要往上翻看第一个 exception。2026-10-12 的 capture 里 walkthrough A 真的收到 HTTP 429，而 `-d xx` 这种语言码 typo 是 `ValueError: invalid destination language`。③ SSH 窗口断线重连后 `(app)` 没了，要重新 `cd simple-translate` 再 `source .venv/bin/activate`。
 - **README 的几个小 errata：** prompt 实际是 `(app)` 不是 `(simple-translate)`；repo 里根本没有 commit `uv.lock`（每个人第一次 `uv sync` 都重新 resolve）；activate 之后 `pip` 也不会指向 venv（uv venv 没有 pip）。
 - **做完要删：** 每个 walkthrough 做完都 Delete VM（boot disk 默认跟着一起删）。是 delete 不是 stop：stop 之后 disk（还有 reserved static IP）照样计费。删完检查 VM instances 和 Disks 两页都是空的。
+- **Lecture slides：** 老师的 Lecture 1 slides（主 deck 75 页，加上 course intro 18 页）和这份 guide 各节怎么对应、做 tutorial 需要的 10 个 lecture ideas，以及 slides 和今天 repo/captures 不一样的 11 处，都在下面的 [Lecture slides](#lecture-slides)。最要紧的两处：① slide 69 用 `uv init --bare` + `uv add` 从零建 project；clone 下来的 repo 已经有 `pyproject.toml`，在里面跑 `uv init --bare` 会报 "Project is already initialized"：照 README 用 `uv sync`（就是 slide 70 的 "After the First Time"）。② slide 50 列的 venv 三部分是 site-packages、symlinks 和 scripts（`activate`），这份 guide 的第三部分是 `pyvenv.cfg`：两样都在 `.venv` 里，两种说法都记住。
 
 ## At a glance
 
@@ -51,6 +52,53 @@
 - **Ed lesson:** its slides and notes were not accessible when these sources were checked; the course site source `tutorials_demo.md:16-27`, which links the two README sections above, was used instead.
 
 </details>
+
+## Lecture slides
+
+The instructor's slides for this lecture are two decks: *Lecture 1: Virtual Environments and Virtual Machines* (75 slides) and the course introduction, *MLOps & LLMOps: Production AI Systems* (18 slides, written "intro N" below). Slide numbers are PDF page numbers. The slides are not reproduced here; what follows is in our own words. The full slide digest and the cross-check with the video live in the Explainer_Videos repo, in `videos/ac215-l01-vms-venvs/SLIDES.md` (this answers the open question in §9 about what the lecture adds). The lecture's tutorial slides (39–48 and 72) give this repo's two walkthroughs as short checklists, and its uv slides (65–70) show the commands, including how a project like this one is created. Deleting the VM, PEP 668, installing uv and what activation changes are only in the README.
+
+**Map**
+
+| This guide | Slides |
+|---|---|
+| At a glance; §1 What you build | 33–34, 49 (the three tools: VMs, virtual environments, and containers next week); 39–40, 72 (the two tutorial checklists) |
+| §2 Prerequisites and costs | 41–42 (Google Cloud; a personal account); costs and deleting: none (tutorial-only) |
+| Command checklist; §4 Part A (Steps 0–9) | 40–48 (the console path, "Select all defaults", SSH, `git clone`) |
+| §3.1 Virtual machine | 35–38, 73 |
+| §3.2 The system Python and PEP 668 | 51–52 (one base install for everything); PEP 668 itself: none |
+| §3.3 Virtual environment | 50, 55–56, 59–60, 73 |
+| §3.4 Activation | 51–52 (`which python`), 60, 67 |
+| §3.5 Declared vs resolved; the lockfile | 53–54, 63, 65–66, 68–70 |
+| §3.6 Python version: constraint vs pin | 63, 65 (constraints vs exact versions, for packages); uv choosing a Python: none |
+| §3.7 uv instead of five tools; pipenv | 57–58, 61–65 |
+| §3.8 Why both | 7, 28–32 (why isolate at all), 73 |
+| §4 Part B (Steps 10–21) | 67, 69–70, 72 |
+| §7 Where this sits in the course | 4–17 (MLOps, the tech stack, "Our Stack"), 19–27 (the Cheese App), 33–34, 49 (containers next week); intro 10–18 |
+
+**Lecture ideas you need for this tutorial**
+1. Teams hit "it works on my machine": each stage and each person runs a different OS and Python setup. The fix is isolated environments that can be shared, a common OS whatever the host, and tracked installs (slides 7, 28–32).
+2. A VM is a computer made of software: a hypervisor creates and runs it on the host, and each guest has its own OS, which can differ from the others (slide 36).
+3. VMs are safe and autonomous (software inside can't harm the host), but large, slower and slow to start; containers come next week (slides 33, 37–38).
+4. The VM tutorial is: console → Compute Engine → VM instances → Create instance → defaults → SSH → `git clone`. Use a personal account, not one tied to a university or employer domain (slides 40–48, 42).
+5. A venv is a directory: a site-packages folder for third-party libraries, links to a real interpreter, and scripts (`activate`) that make your shell use them (slide 50).
+6. One base install means one version of each library for every project. A per-project environment, shared as a file, lets a teammate rebuild it exactly (slides 51–54).
+7. Venvs make dependencies explicit and results reproducible, but they isolate only Python packages and may behave differently across operating systems (slides 55–56, 73).
+8. There are five tools: venv, conda, pipenv, mamba and uv. Each records the environment in a file (`requirements.txt`, `environment.yml`, `Pipfile` + `Pipfile.lock`), and the course uses uv (slides 57–64).
+9. uv has two key files and a key directory: `pyproject.toml` (what the project needs, human-edited), `uv.lock` (the exact versions) and `.venv/` (the installed environment) (slides 65–66, 68).
+10. Start a project with `uv init --bare` and `uv add`; join one with `uv sync`; run code after activation or with `uv run` (slides 67, 69–70).
+
+**Where the slides and today's tutorial differ** (the 2026-10-12 captures show what runs today)
+1. Slide 50 lists `site_packages/`, links "to system executables" and scripts. The real folder is `site-packages`; on Debian 12, `.venv/bin/python` links to uv's downloaded Python, not the system's; and `pyvenv.cfg`, which the slide doesn't name, is what keeps the system's packages out (§3.3).
+2. Slides 63 and 65 call the lock files "not human readable". `uv.lock` is plain TOML you can read; uv writes it, so don't edit it by hand (§5).
+3. Slide 69 creates this app's project with `uv init --bare` and `uv add googletrans==4.0.2 art`. The clone already has `pyproject.toml`, so `uv init --bare` there stops with "Project is already initialized": in the clone, run `uv sync`, slide 70's path (Step 17).
+4. Slide 70 says `uv sync` installs the exact versions from `uv.lock`. This repo commits no `uv.lock`, so your first `uv sync` resolves afresh and writes one (§9, erratum 1).
+5. Slides 40 and 72 say "Install dependencies: git, Python". Python is already on the image: walkthrough A installs pip, and walkthrough B installs uv, whose `uv sync` brings its own Python if needed (Steps 6, 15, 17).
+6. Slide 46 says "Select all defaults"; this guide suggests e2-small and Debian 12. Both work, and the boot image decides whether uv downloads a Python (Debian 12) or uses the system's (Debian 13) (Step 1, §3.6).
+7. Slide 48's SSH screenshot comes from an older Debian image (a 2021-era kernel, read from a small render). Your banner says Debian 12 or 13, where pip refuses system installs without `--break-system-packages` (§3.2).
+8. The links on slides 40 and 72 use anchors that don't match the README's headings (the second ends in `-t2`), so they most likely open the README at the top; use this guide's Links (§9, erratum 8).
+9. Slide 60 installs with `pip` inside a venv, and slide 65 calls uv a "drop-in replacement for pip". That holds for `python3 -m venv`, but a uv venv has no pip: use `uv add` (or `uv pip install`) (§6 #10).
+10. Slide 64 installs pipenv with `pip install pipenv`. On the walkthrough VMs the system pip refuses (A) or doesn't exist (B); the pipenv branch's README uses `sudo apt install pipenv` (Step 22).
+11. Slide 36 stacks VMs on a hypervisor on a host OS, and slide 73 puts every venv on one shared Python. Both are fine in general, but on Debian 12 your uv venv runs uv's own Python, not the system's (§3.3, §3.6).
 
 ## Command checklist
 

@@ -80,7 +80,7 @@ The instructor's deck for this lecture is *Lecture 22: Scaling: Kubernetes (clou
 | Checklist *Deployment with Scaling using Kubernetes* and *Create & Deploy Cluster*; §4 Steps 1–11 and 13 | 41 only: the Pulumi steps are tutorial-only. The `kubectl` checks use the commands of slides 27–29 and 34–36 |
 | §3.1 Cluster = control plane + node pools | 17–19, 22–26 (node pools, regional clusters, private nodes and NAT are tutorial-only) |
 | §3.2 Desired state | 7, 11, 15, 18, 25, 30, 36, 39 (ReplicaSets and Jobs are tutorial-only) |
-| §3.3 Labels, Services, cluster DNS and namespaces | 29, 35, 39 (labels, DNS and namespaces are tutorial-only) |
+| §3.3 Labels, Services, cluster DNS and namespaces | 29, 35, 39 (labels and DNS are tutorial-only; namespaces too, apart from slide 29's passing mention of the default namespace) |
 | §3.4 How a request reaches a Pod | 5, 21, 24–26, 38–39 (Ingress, Helm and `sslip.io` are tutorial-only) |
 | §3.5 Persistent storage; §3.7 Identity; §3.8 Pulumi | none, except 33 (`get-credentials`) for §3.7 and 41 for §3.8 |
 | §3.6 Scaling; §4 Step 12 | 12, 15, 18, 39 (`replicas: 2`), 43 |
@@ -102,18 +102,18 @@ The instructor's deck for this lecture is *Lecture 22: Scaling: Kubernetes (clou
 10. Delete the cluster when you are done (slides 40, 44).
 
 **Where the slides and today's tutorial differ** (in each case the repo, as verified here, is what runs today)
-- Slides 15, 18 and 43 promise automatic scaling on CPU and memory. The cheese app sets no `replicas` and has no HPA; only the node pool scales itself, from 1 to 2 nodes. Scale Pods yourself with `kubectl scale` (§3.6, §4 Step 12, §9 erratum 3).
+- Slide 18 promises scaling on CPU, memory or custom metrics, slide 15 ticks "Scaling" and slide 43 promises automatic adjustment to load. The cheese app sets no `replicas` and has no HPA; only the node pool scales itself, from 1 to 2 nodes. Scale Pods yourself with `kubectl scale` (§3.6, §4 Step 12, §9 erratum 3).
 - Slides 8, 13 and 15 promise failover to a backup. Every cheese-app Deployment runs one Pod, so a crash means a restart, not a switch. The nodes sit in one zone, and the API and the vector DB cannot have a replica on a second node because their disks are ReadWriteOnce (§3.5, §6 item 10).
 - Slide 13 runs one cluster per component. The cheese app runs everything in one cluster and one namespace, `cheese-app-namespace` (§1).
-- Slides 32–33 create the warm-up cluster with `--num-nodes 1`; the README (line 541) uses `--num-nodes 2`. Their output shows old versions (GKE 1.20, kubectl 1.22) (§4 Part 0).
+- Slides 32–33 create the warm-up cluster with `--num-nodes 1`; the README (line 541) uses `--num-nodes 2`. The slides' outputs show old versions (GKE 1.20 on slides 33 and 36, kubectl 1.22 on slide 34) (§4 Part 0).
 - Slides 32 and 40 create and delete clusters with `gcloud`, and slide 34 says you need `kubectl` to create one. The cheese-app cluster is created by `pulumi up` and removed by `pulumi destroy`, and `kubectl` never creates clusters (§4 Steps 7, 14).
 - Slide 33 connects with `get-credentials … --zone us-east1-c --project ac215-project`. For the cheese app, run `gcloud container clusters get-credentials cheese-app-cluster --region us-central1 --project <PROJECT>` in each new container session (§6 item 2).
 - Slides 32 and 34 say to install `gcloud` and `kubectl`. They are already in the deployment container (kubectl 1.34), together with Helm and `gke-gcloud-auth-plugin`, which the slides do not list (§2).
-- Slide 35 runs `kubectl get componentstatuses` and shows healthy components. The command has been deprecated since Kubernetes 1.19 and prints a warning (§6 item 19).
+- Slide 35 runs `kubectl get componentstatuses` and shows healthy components. The command has been deprecated since Kubernetes 1.19 and prints a warning (§4 Part 0, step 0.3; §6 item 19).
 - Slide 23 draws the control plane as master nodes. On GKE Google runs it and you never see its machines: `kubectl get nodes` lists only workers (§3.1).
 - Slides 19, 22 and 26 say the nodes run Docker. GKE nodes run containerd (`cos_containerd`), and Docker-built images run unchanged (§3.1).
 - Slides 38–39 expose each app with its own `LoadBalancer` Service. In the cheese app the three Services are `ClusterIP`: only the NGINX Ingress controller's Service gets an external IP, and an Ingress routes by host and path (§3.3, §3.4).
-- Slide 39's YAML leaves out the name, the selector and the Pod template, so Kubernetes would reject it. The real `deploy-k8s-tic-tac-toe.yml` links the Deployment and the Service through the label `run: web` (§5 excerpts 6–7).
+- Slide 39's YAML leaves out `metadata.name`, the selector and the Pod template, so Kubernetes would reject it. The real `deploy-k8s-tic-tac-toe.yml` links the Deployment and the Service through the label `run: web`; the cheese app does the same with `run: frontend` (§5 excerpts 6–7).
 - Slide 21 labels the vector DB link "TCP/IP 5432". ChromaDB listens on 8000, and a fifth container, the loader, becomes a Job in L22 (§1).
 - Slide 29 port-forwards "so you can open it in your browser". The deployment container publishes no ports, so the forwarded port is reachable only inside the container: `curl` it there (§3.4).
 
