@@ -78,7 +78,7 @@ lectures:
       - {name: "Docker Compose · Port Toy App", repo: port_toy}
     guide: guides/L04-containers-2b-flexible-workflow-ports.md
     video: ac215-l04-flexible-workflow-ports
-    video_status: "🛠 whole-video QA"
+    video_status: "🎬 32 min, 2 parts · release pending"
   - n: 5
     title: Introduction to RAG
     ed: https://edstem.org/us/courses/97373/lessons/182195/
@@ -86,7 +86,7 @@ lectures:
       - {name: "LLM-RAG · vector DB + LLM", repo: llm-rag}
     guide: guides/L05-rag.md
     video: ac215-l05-rag
-    video_status: "🛠 building scenes"
+    video_status: "⏸ paused (building scenes)"
   - n: 6
     title: "LLM: Agents I"
     ed: https://edstem.org/us/courses/97373/lessons/166030/
