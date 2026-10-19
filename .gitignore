@@ -1,0 +1,18 @@
+# tutorial clones (tools/sync_tutorials.py puts them here; they are their own git repos)
+tutorials/
+
+# credentials: never commit them (the course keeps GCP keys in a secrets/ folder next to the repos)
+secrets/
+**/secrets/
+*.pem
+*service-account*.json
+*-key.json
+.env
+.env.*
+
+# local tooling
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+.ipynb_checkpoints/
