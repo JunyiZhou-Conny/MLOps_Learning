@@ -61,7 +61,7 @@ lectures:
       - {name: "Simple Translate · run the image on a VM", repo: simple-translate, section: "Running App on VM using Docker"}
     guide: guides/L02-containers-1.md
     video: ac215-l02-containers-1
-    video_status: "🎬 31 min, 2 parts · release pending"
+    video_status: "🎬 31 min, 2 parts · on Bilibili (BV1dHJd6PEvW)"
   - n: 3
     title: Containers II
     ed: https://edstem.org/us/courses/97373/lessons/166033/
@@ -69,7 +69,7 @@ lectures:
       - {name: "Mega Pipeline App", repo: mega-pipeline}
     guide: guides/L03-containers-2-mega-pipeline.md
     video: ac215-l03-mega-pipeline
-    video_status: "🎬 31 min, 2 parts · release pending"
+    video_status: "🎬 31 min, 2 parts · on Bilibili (BV1kyJ966ESH)"
   - n: 4
     title: Containers II-b
     ed: https://edstem.org/us/courses/97373/lessons/166029/
@@ -78,7 +78,7 @@ lectures:
       - {name: "Docker Compose · Port Toy App", repo: port_toy}
     guide: guides/L04-containers-2b-flexible-workflow-ports.md
     video: ac215-l04-flexible-workflow-ports
-    video_status: "🎬 32 min, 2 parts · release pending"
+    video_status: "🎬 32 min, 2 parts · on Bilibili (BV1DVnJ6oE2P)"
   - n: 5
     title: Introduction to RAG
     ed: https://edstem.org/us/courses/97373/lessons/182195/
@@ -86,7 +86,7 @@ lectures:
       - {name: "LLM-RAG · vector DB + LLM", repo: llm-rag}
     guide: guides/L05-rag.md
     video: ac215-l05-rag
-    video_status: "⏸ paused (building scenes)"
+    video_status: "🎬 31 min, 2 parts · release pending"
   - n: 6
     title: "LLM: Agents I"
     ed: https://edstem.org/us/courses/97373/lessons/166030/
@@ -98,6 +98,7 @@ lectures:
       - {name: "Cheese Newsletter · Harness (Colab)", colab: "https://colab.research.google.com/drive/1nnHrJ4Si3tpgUQl6HqlcwxKymV1-ecPv?usp=sharing"}
     guide: guides/L06-agents-1.md
     video: ac215-l06-agents-1
+    video_status: "🎬 31 min draft · in review"
   - n: 7
     title: "LLM: Agents II"
     ed: https://edstem.org/us/courses/97373/lessons/166031/
