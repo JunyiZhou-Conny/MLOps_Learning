@@ -86,7 +86,7 @@ lectures:
       - {name: "LLM-RAG · vector DB + LLM", repo: llm-rag}
     guide: guides/L05-rag.md
     video: ac215-l05-rag
-    video_status: "🎬 31 min, 2 parts · release pending"
+    video_status: "🎬 31 min, 2 parts · on Bilibili (BV1xgns6NEiz)"
   - n: 6
     title: "LLM: Agents I"
     ed: https://edstem.org/us/courses/97373/lessons/166030/
@@ -98,7 +98,7 @@ lectures:
       - {name: "Cheese Newsletter · Harness (Colab)", colab: "https://colab.research.google.com/drive/1nnHrJ4Si3tpgUQl6HqlcwxKymV1-ecPv?usp=sharing"}
     guide: guides/L06-agents-1.md
     video: ac215-l06-agents-1
-    video_status: "🎬 31 min draft · in review"
+    video_status: "🎬 31 min, 2 parts · final review"
   - n: 7
     title: "LLM: Agents II"
     ed: https://edstem.org/us/courses/97373/lessons/166031/
