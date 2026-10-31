@@ -1,46 +1,48 @@
 # L08 · LLM: Finetuning — study guide
 
-[Ed lesson](https://edstem.org/us/courses/97373/lessons/166032/) · Tutorial: [`dlops-io/llm-finetuning`](https://github.com/dlops-io/llm-finetuning) `main` @ [`44ef6f0`](https://github.com/dlops-io/llm-finetuning/tree/44ef6f0a70315aa0a551b8565ca862679a87c1eb) (whole README; last year's branch `pipenv` @ [`fb0073a`](https://github.com/dlops-io/llm-finetuning/tree/fb0073a87ec81ad1e5acb0adc58f3c1a6c307341), read for comparison only) · Colab: [Tutorial - Finetuning with QLoRA](https://colab.research.google.com/drive/1oX3ADMHphW2v7mwV7zkEWD5oYewJZEAC) · Video: planned · Made from the verified digest, 2026-10-13
+[Ed lesson](https://edstem.org/us/courses/97373/lessons/166032/) · Tutorial: [`dlops-io/llm-finetuning`](https://github.com/dlops-io/llm-finetuning) `main` @ [`44ef6f0`](https://github.com/dlops-io/llm-finetuning/tree/44ef6f0a70315aa0a551b8565ca862679a87c1eb) (whole README; last year's branch `pipenv` @ [`fb0073a`](https://github.com/dlops-io/llm-finetuning/tree/fb0073a87ec81ad1e5acb0adc58f3c1a6c307341), read for comparison only) · Colab: [Tutorial - Finetuning with QLoRA](https://colab.research.google.com/drive/1oX3ADMHphW2v7mwV7zkEWD5oYewJZEAC) · Video: [AC215 · L08 follow-along](https://github.com/JunyiZhou-Conny/Explainer_Videos/tree/main/videos/ac215-l08-llm-finetuning) · Made from the verified digest and real terminal captures, 2026-10-13
+
+> **Names.** The tutorial's persona is the instructor's first name, and some tutorial texts carry the instructor's full name. This guide writes the persona as `‹instructor›` wherever it quotes the README, the code or a stored output, as the video and the exercises do; the instructor's project number and endpoint id at `gemini-finetuner/cli.py:107` are written `‹instructor-project-number›` and `‹endpoint-id›`, and the Hugging Face account in the stored notebook output is `‹hf-user›`.
 
 ## 中文速览
 
-- **做什么：** 两条 track，目标都是把 model 教成用 "Pavlos style" 回答 cheese 问题。**Track A（repo，managed fine-tuning）**：在 laptop 上跑两个 Docker container。`dataset-creator` 里 `python cli.py --generate` 让 Gemini（`gemini-3.1-flash-lite`，`location="global"`）生成 5 批、每批 20 个 Q&A，`--prepare` 去重 + 90/10 split，写出 Gemini 格式的 `train.jsonl`/`test.jsonl`，`--upload` 传到你自己的 GCS bucket；`gemini-finetuner` 里 `--train` 向 Vertex AI（现在改名叫 "Agent Platform"）提交一个 supervised tuning job，`--chat` 调你自己的 tuned endpoint。**Track B（Colab，open-source PEFT）**：用 QLoRA 微调 `Qwen/Qwen3-0.6B`（4-bit NF4 + LoRA r=8），900 条数据、450 steps，A100 上约 3.5 分钟。
-- **Idea 1 · fine-tuning 改的是 weights，学到的是 style 不是 facts：** prompting 改 prompt，RAG（L05）改 input 里的 context，fine-tuning 改 weights。它擅长 tone、persona、format，但不能可靠地注入新 facts。stored run 里问 "Why is the sky blue?"，fine-tuned model 开口就是 "Yello - this is Pavlos your cheese monker…"，物理却照样是错的（怪到 water molecules 头上）。
-- **Idea 2 · synthetic data 和数据格式：** teacher LLM + 一个很长的 system prompt + `response_schema`（structured output）批量造 training data，teacher 的 hallucination 也会被 student 一起学走。同一个 Q&A pair 依次变成 CSV row → Gemini JSONL（`role` 是 `user`/`model`）→ Qwen3 的 chat template（`<|im_start|>`、空的 `<think></think>`、EOS `<|im_end|>`）→ token IDs。training 和 inference 用的 template 必须一致。
-- **Idea 3 · managed tuning 是一个 async job：** `tunings.tune(...)` 只是一个 HTTPS POST 到 `us-central1`，Google 在自己的 hardware 上训练一个 adapter（`ADAPTER_SIZE_FOUR`），你最后拿到的是 endpoint（`projects/<num>/locations/us/endpoints/<id>`），拿不到 weights。一共三个 location：generation 用 `global`，tuning 用 `us-central1`，serving 用 multi-region `us`（google-genai 1.39.1 需要 `base_url` override）。`--train` 打印 `Tuned model info: None` 是正常的：`main()` 写死了 `wait_for_job=False`，要去 console 看 job 状态。
-- **Idea 4 · QLoRA = 4-bit quantization + LoRA：** NF4 把每个 weight 存成 16 个 level 之一的 4-bit index（double quant 再压缩 per-block constants，算的时候 dequantize 成 fp16）；LoRA 学 `ΔW = (α/r)·B·A`，B 初始化为 0，PEFT 对 Qwen3 默认只挂在 `q_proj`/`v_proj` 上，所以是 1,146,880 个 trainable params（0.30%），adapter 只有 4.6 MB。`print` 出来是 375.8 M 而不是 596 M，因为两个 4-bit weight 打包进一个 byte。
-- **Idea 5 · 怎么判断 work 了：** 同样 100 条 test data，adapter 关掉 vs 打开：loss 2.65 → 1.39，perplexity 14.15 → 4.00。但 loss 算的是所有 token（包括 question 和 template），所以它主要衡量 style fit，不代表答案更正确。
-- **最费时间的坑：** ① README 没说要改 code：`env.dev` 里的 `GCP_PROJECT`/`GCS_BUCKET_NAME`，`gemini-finetuner/cli.py:10-11` 写死的 `gs://cheese-dataset/...`，还有 `:107` 的 `MODEL_ENDPOINT`（instructor 的 endpoint）都要换成你自己的；bucket 要自己建，Vertex AI API 要自己 enable。② Ubuntu/Debian/WSL 上 `sh docker-shell.sh` 报 `source: not found`（`/bin/sh` 是 dash），改用 `bash docker-shell.sh`。③ `--generate` 把所有 error 都吞掉：key 没放在 repo **旁边**的 `secrets/llm-service-account.json`，五批全部失败，接着 `--prepare` 报 `KeyError: 'question'`。每一行输出都要读。
+- **做什么：** 两条 track，目标都是把 model 教成用老师的 persona（"‹instructor› style"）回答 cheese 问题。**Track A（repo，managed fine-tuning）**：在 laptop 上跑两个 Docker container。`dataset-creator` 里 `python cli.py --generate` 让 Gemini（`gemini-3.1-flash-lite`，`location="global"`）生成 5 批、每批 20 个 Q&A，`--prepare` 去重 + 90/10 split，写出 Gemini 格式的 `train.jsonl`/`test.jsonl`，`--upload` 传到你自己的 GCS bucket；`gemini-finetuner` 里 `--train` 向 Vertex AI（现在改名叫 "Agent Platform"）提交一个 supervised tuning job，`--chat` 调你自己的 tuned endpoint。**Track B（Colab，open-source PEFT）**：用 QLoRA 微调 `Qwen/Qwen3-0.6B`（4-bit NF4 + LoRA r=8），900 条数据、450 steps，课程 staff 存下来的 A100 run 用了 3 分 36 秒。
+- **Idea 1 · fine-tuning 改的是 weights，学到的是 style 不是 facts：** prompting 改 prompt，RAG（L05）改 input 里的 context，fine-tuning 改 weights。它擅长 tone、persona、format，但不能可靠地注入新 facts。recorded run 里问 "Why is the sky blue?"，fine-tuned model 开口就是 "Yello - this is ‹instructor› your cheese monker…"，物理却照样是错的（怪到 water molecules 头上；base model 怪 refraction，也是错的）。
+- **Idea 2 · synthetic data 和数据格式：** teacher LLM + 一个很长的 system prompt + `response_schema`（structured output）批量造 training data，teacher 的 hallucination 也会被 student 一起学走。同一个 Q&A pair 依次变成 CSV row → Gemini JSONL（`role` 是 `user`/`model`）→ Qwen3 的 chat template（`<|im_start|>`、空的 `<think></think>`、EOS `<|im_end|>`）→ token IDs。在 capture 里用 20 个手写的 **scripted** pairs 跑 `--prepare`：去重后 `Shape: (19, 2)`，`train.jsonl` 17 行、`test.jsonl` 2 行。
+- **Idea 3 · managed tuning 是一个 async job：** `tunings.tune(...)` 只是一个 HTTPS POST 到 `us-central1`，Google 在自己的 hardware 上训练一个 adapter（`ADAPTER_SIZE_FOUR`），你最后拿到的是 endpoint（`projects/<num>/locations/us/endpoints/<id>`），拿不到 weights。一共三个 location：generation 用 `global`，tuning 用 `us-central1`，serving 用 multi-region `us`（google-genai 1.39.1 需要 `base_url` override）。按代码，`--train` 打印 `Tuned model info: None` 是正常的：`main()` 写死了 `wait_for_job=False`，要去 console 看 job 状态，再把 endpoint 贴进 `cli.py:107`。
+- **Idea 4 · QLoRA = 4-bit quantization + LoRA：** NF4 把每个 weight 存成 16 个 level 之一的 4-bit index（double quant 再压缩 per-block constants，算的时候 dequantize 成 fp16）；LoRA 学 `ΔW = (α/r)·B·A`，B 初始化为 0，PEFT 对 Qwen3 默认只挂在 `q_proj`/`v_proj` 上，所以是 1,146,880 个 trainable params（0.30%），adapter 约 4.6 MB。`print` 出来是 375.8 M 而不是 596 M，因为两个 4-bit weight 打包进一个 byte。
+- **Idea 5 · 怎么判断 work 了：** 同样 100 条 test data，adapter 关掉 vs 打开：loss 2.6498 → 1.3872，perplexity 14.15 → 4.00。但 loss 算的是所有 token（包括 question 和 template），所以它主要衡量 style fit，不代表答案更正确。
+- **最费时间的坑：** ① README 没说要改 code：`env.dev` 里的 `GCP_PROJECT`/`GCS_BUCKET_NAME`，`gemini-finetuner/cli.py:10-11` 写死的 `gs://cheese-dataset/...`，还有 `:107` 的 `MODEL_ENDPOINT`（老师的 endpoint）都要换成你自己的；bucket 要自己建，API 要自己 enable。② Debian/Ubuntu/WSL 上 `sh docker-shell.sh` 报 `docker-shell.sh: 8: source: not found`（`/bin/sh` 是 dash，capture 里 exit 127），改用 `bash docker-shell.sh`；macOS 上 README 的命令可以直接用。③ key 没放在 repo **旁边**的 `secrets/llm-service-account.json`：capture 里 `--generate` 五批全部打印 `File /secrets/llm-service-account.json was not found.`，却 **exit 0**；下一条 `--prepare` 才报 `KeyError: 'question'`。每一行输出都要读，先 `ls -la /secrets`。④ 用 `docker exec` 开第二个 shell 不会跑 entrypoint，venv 没 activate：`python` 是 `/usr/local/bin/python`，`ModuleNotFoundError: No module named 'pandas'`。
 - **Colab 的坑：** 别跳过 `!uv pip uninstall torchao`（否则 nb cell 86 merge 时会报 ImportError；这是读 peft source 推断的，没有实测）；别删 nb cell 72 的 fp32 cast（`fp16=True` 没法 unscale bf16 gradients）；改了 LoRA config 想重训，先重跑 nb cell 36 重新 load model。
-- **做完要删：** `gcloud storage rm -r gs://<bucket>/llm-finetune-dataset-small`（或者删整个 bucket）；tuned model/endpoint 在 console 里删（L10 `cheese-app-v0` 还要用，可以留到 L10 之后）；不用的 SA key 删掉；本地 `docker image rm llm-dataset-creator gemini-finetuner`；Colab 用 *Runtime → Disconnect and delete runtime*，Drive 空间不够就删 `MyDrive/LLM_cache`。
+- **做完要删：** `gcloud storage rm -r gs://<bucket>/llm-finetune-dataset-small`（或者删整个 bucket）；tuned model/endpoint 在 console 里删（L10 `cheese-app-v0` 还要用，可以留到 L10 之后）；不用的 SA key 删掉；本地 `docker image rm llm-dataset-creator gemini-finetuner`（capture 里两个 image 各 1.64 GB）；Colab 用 *Runtime → Disconnect and delete runtime*，Drive 空间不够就删 `MyDrive/LLM_cache`。
 - **Lecture slides：** 老师的 Lecture 8 slides（`L08_FineTuning_v2`，73 页）讲的是 Track B 背后的理论：instruction fine-tuning、full fine-tuning 的显存账（10B model 约 120 GB）、LoRA，再到 QLoRA（4-bit NF4 + paged optimizer，10B 约 12 GB）；Track A（Gemini managed tuning）不在 slides 里。这份 guide 各节和 slides 怎么对应、做 tutorial 需要的 10 个 lecture ideas，以及 slides 和 notebook 不一样的 8 处，都在下面的 [Lecture slides](#lecture-slides)。最要紧的两处：① slides 用 BF16 计算，notebook 为了 T4 用 FP16，并把 adapters 转回 FP32；② slides 跳过了 double quantization，notebook 打开了 `bnb_4bit_use_double_quant=True`。
 
 ## At a glance
 
-**What you build.** In Track A (the repo), two Docker containers on your laptop have Gemini write about 100 synthetic cheese Q&A pairs in Pavlos' voice, convert them to Gemini's JSONL tuning format, upload them to your Cloud Storage bucket and submit a managed supervised tuning job, which leaves a tuned-Gemini endpoint in your project that you then chat with. In Track B (Colab), you fine-tune `Qwen/Qwen3-0.6B` yourself with QLoRA (a frozen 4-bit NF4 base plus LoRA adapters), compare loss and perplexity with the adapter off and on, and save a 4.6 MB adapter and a 1.2 GB merged model to Google Drive.
+**What you build.** In Track A (the repo), two Docker containers on your laptop have Gemini write about 100 synthetic cheese Q&A pairs in the instructor's voice, convert them to Gemini's JSONL tuning format, upload them to your Cloud Storage bucket and submit a managed supervised tuning job, which leaves a tuned-Gemini endpoint in your project that you then chat with. In Track B (Colab), you fine-tune `Qwen/Qwen3-0.6B` yourself with QLoRA (a frozen 4-bit NF4 base plus LoRA adapters), compare loss and perplexity with the adapter off and on, and save a 4.6 MB adapter and a 1.2 GB merged model to Google Drive.
 
-**Time needed** (estimate). Track A: about 1-1.5 h of hands-on time (the service account and key are reused from L05 if you have them; the first image build takes several minutes), plus the wait for the tuning job, whose duration for a ~90-example, 1-epoch job is an open question (§9). Track B: about 1 h; training itself takes "~3.5 min on A100, ~4.5 min on L4, ~6-7 min on T4" (nb cell 75:2). The exercises (§8) add 1-2 h.
+**Time needed** (estimate). Track A: about 1-1.5 h of hands-on time (the service account and key are reused from L05 if you have them). The first image build took 45.1 s on the capture machine with a fast network; on a laptop with Docker Desktop, expect several minutes. The second image builds in 0.0 s from cache. Add the wait for the tuning job, whose duration for a ~90-example, 1-epoch job is an open question (§9). Track B: about 1 h; training itself takes "~3.5 min on A100, ~4.5 min on L4, ~6-7 min on T4" (nb cell 75:2), and the recorded A100 run took 3 min 36 s. The follow-along video walks through both tracks in two parts (Track A, then Track B). The exercises (§8) add 1-2 h.
 
 **Prerequisites.**
-- Track A: a GCP project with billing enabled; the service account `llm-service-account` with **Storage Admin** and **Agent Platform User** (`roles/aiplatform.user`), its JSON key in `<parent>/secrets/` next to the repo (the same SA and folder as L05); the Vertex AI API enabled; a bucket of your own.
-- Locally: Docker, `git`, a shell that understands `source` (`bash`), optionally the `gcloud` CLI.
+- Track A: a GCP project with billing enabled; the service account `llm-service-account` with **Storage Admin** and **Agent Platform User** (`roles/aiplatform.user`), its JSON key in `<parent>/secrets/` next to the repo (the same SA and folder as L05); the Vertex AI ("Agent Platform") API enabled; a bucket of your own.
+- Locally: Docker, `git`, a shell that understands `source` (`bash`; macOS's `sh` also works), optionally the `gcloud` CLI.
 - Track B: a Google account (Colab and Drive), a free Hugging Face account and access token, a GPU runtime (the free T4 works).
 - Background: containers, bind mounts and `docker-shell.sh` scripts (L02-L04); the `llm-rag` container, service account and google-genai client (L05); structured output (L06-L07).
 
-**What it costs.** Track A: dataset generation costs cents (5 calls), Cloud Storage is negligible, and the tuning job is billed per training token × epochs. At the README's stale price ($0.008 per 1k tokens), a ~24k-token dataset × 1 epoch ≈ $0.19; check the current price. Managed tuned-Gemini endpoints are understood to be billed per request/token with no per-hour node charge (not verified, §9). Track B: free on a T4; A100/L4 need Colab Pro or compute units. A few GB of Drive; a private Hugging Face repo is free.
+**What it costs.** Track A: dataset generation costs cents (5 calls), Cloud Storage is negligible, and the tuning job is billed per training token × epochs. At the README's stale price ($0.008 per 1k tokens), a ~24k-token dataset × 1 epoch ≈ $0.19; check the current price. Managed tuned-Gemini endpoints are understood to be billed per request/token with no per-hour node charge (not verified, §9). Locally: two 1.64 GB images. Track B: free on a T4; A100/L4 need Colab Pro or compute units. A few GB of Drive; a private Hugging Face repo is free.
 
 **Tear down, exactly** (§2):
 1. `gcloud storage rm -r gs://<bucket>/llm-finetune-dataset-small`, or delete the bucket.
 2. Delete the tuned model/endpoint in the console (Agent Platform / Vertex AI → Tuning, Model Registry, Endpoints) once you're done with it. Keep it until after L10 if you want to use it in `cheese-app-v0`.
 3. Delete old service-account keys you no longer use.
-4. Locally: `docker image rm llm-dataset-creator gemini-finetuner`.
+4. Locally: `exit` the container, then `docker image rm llm-dataset-creator gemini-finetuner` (captured: two `Untagged:`/`Deleted:` pairs).
 5. Colab: Runtime → Disconnect and delete runtime. Delete `MyDrive/LLM_cache` if you need the space.
 
 <details>
 <summary><b>Versions and sources this guide was checked against</b></summary>
 
-- **Lecture-to-tutorial mapping:** the course-site source `2026-AC215/tutorials_demo.md:112-118`. The weekly schedule lists "LLM - Finetuning" on **Oct 1** but labels it "Lecture 7" (`2026-AC215/_modules/week-05.md:11-13`). The Ed lesson itself was not accessible, so this guide is built from the repo and the Colab notebook.
-- **Repo:** `dlops-io/llm-finetuning`, branch **`main`** (default), commit `44ef6f0a70315aa0a551b8565ca862679a87c1eb`, committed 2026-10-05 22:52:07 -0400 ("remove pipfile from gemini-finetuning"). This is also the course map's pin (`MLOps_Learning/course/lectures.yaml:27`).
+- **Lecture-to-tutorial mapping:** the course-site source `2026-AC215/tutorials_demo.md:112-118`. The weekly schedule lists "LLM - Finetuning" on **Oct 1** but labels it "Lecture 7" (`2026-AC215/_modules/week-05.md:11-13`). The Ed lesson itself was not accessible, so this guide is built from the repo, the Colab notebook, the lecture slides and the captures.
+- **Repo:** `dlops-io/llm-finetuning`, branch **`main`** (default), commit `44ef6f0a70315aa0a551b8565ca862679a87c1eb`, committed 2026-10-05 22:52:07 -0400 ("remove pipfile from gemini-finetuning"). This is the course map's pin (`MLOps_Learning/course/lectures.yaml`), and it was still the head of `main` when the captures were made (`laptop/02-x-git-log.txt`).
   - Commits that shape this year's version:
     - `c9b52dd` (2025-10-14): Pipenv → uv, `vertexai` SDK → `google-genai`; generator and tuning base both moved from Gemini 1.5 Flash to `gemini-2.0-flash-001`
     - `1947094` (2026-09-26): tuning base model `gemini-2.0-flash-001` → `gemini-3.1-flash-lite`
@@ -62,16 +64,18 @@
     - [Cost of Fine-tuning](https://github.com/dlops-io/llm-finetuning#cost-of-fine-tuning) `:265-278`
     - [Chat with Fine-tuned Model](https://github.com/dlops-io/llm-finetuning#chat-with-fine-tuned-model) `:282-316`
   - **Not covered by the README:** the `autotrain-runner/` folder (an older open-source path, see §6 and §9).
-- **Colab notebook:** "Tutorial - Finetuning with QLoRA", https://colab.research.google.com/drive/1oX3ADMHphW2v7mwV7zkEWD5oYewJZEAC (the course site calls it "LLM Fine Tuning Notebook"), read from a downloaded JSON copy, `colab/L08_llm_finetuning.ipynb`.
-  - 91 cells, cited as **nb cell N**, where N is the 0-based index in the notebook JSON (Colab shows no numbers); "nb cell 70:2-18" means lines 2-18 of that cell.
-  - Stored outputs come from a run on an **A100** (`metadata.colab.gpuType`). That run used Python 3.13.15 (nb cell 8 output) and torch 2.11.0+cu128, transformers 5.16.1, peft 0.20.0, trl 1.14.0 and bitsandbytes 0.50.2 (nb cell 12 output).
+- **Colab notebook:** "Tutorial - Finetuning with QLoRA", https://colab.research.google.com/drive/1oX3ADMHphW2v7mwV7zkEWD5oYewJZEAC (the course site calls it "LLM Fine Tuning Notebook"), read from a downloaded JSON copy.
+  - 91 cells, cited as **nb cell N**, where N is the 0-based index in the notebook JSON (Colab shows no numbers; the notebook's own section numbers, such as "4.1" or "5.2", are given where they help); "nb cell 70:2-18" means lines 2-18 of that cell.
+  - Stored outputs come from a run by the course staff on an **A100** (`metadata.colab.gpuType`). That run used Python 3.13.15 (nb cell 8 output) and torch 2.11.0+cu128, transformers 5.16.1, peft 0.20.0, trl 1.14.0 and bitsandbytes 0.50.2 (nb cell 12 output). This guide labels them **recorded**.
+- **Terminal captures** (the strongest evidence; files in the video folder's [`assets/terminal/`](https://github.com/JunyiZhou-Conny/Explainer_Videos/tree/main/videos/ac215-l08-llm-finetuning/assets/terminal), described in its [`ASSETS.md`](https://github.com/JunyiZhou-Conny/Explainer_Videos/blob/main/videos/ac215-l08-llm-finetuning/ASSETS.md)): every README command run in README order, exactly as written, on **2026-10-31** in a fresh Docker "laptop" (Linux x86_64, Docker Engine 29.8.2, git 2.54.0, user `student`, uid 1000, workspace `~/AC215` with the clone and `secrets/` side by side). Built images: `python:3.12-slim-bookworm`, **Python 3.12.16**, **uv 0.13.6** (unpinned `pip install uv`), `uv sync --frozen` → `Installed 133 packages`; installed **google-genai 1.39.1**, google-auth 2.41.1, google-cloud-storage 3.4.1, pandas 2.3.3, scikit-learn 1.7.2; image **1.64 GB**, `/.venv` 587 MB. Versions will move; these are the versions at the time of recording.
+  - **No key, no GPU.** The capture had no service-account key and no GCP credentials, so every command that talks to Google shows its real no-key failure. `--prepare` also ran on five hand-written **scripted** files (20 pairs in the shape `--generate` writes, never Gemini's output). What a working run prints comes from the README (labelled **expected**) or, for the Colab, from the stored outputs (**recorded**). Outputs nobody documented (a successful `--generate`, `--upload` or `--train`, the job's run time and cost) are described from the code's `print` lines, without an output block.
 - **Library behaviour** was checked by reading the sources of the exact versions the code uses:
-  - `google-genai` 1.39.1, the version pinned in `dataset-creator/uv.lock:566-567`
+  - `google-genai` 1.39.1, the version pinned in `dataset-creator/uv.lock:566-567` (and installed in the capture)
   - `transformers` 5.16.1, `trl` 1.14.0 and `peft` 0.20.0, the versions the notebook installs
-  - `google-auth` 2.41.1, the version locked in `dataset-creator/uv.lock:502-503`, for error strings (2.62.0 has the same message, but at `_default.py:179` instead of `:174`)
-  - for comparison only: `google-genai` 2.30.0, found installed in a local Docker image layer (not the version this repo locks)
-- **Method:** the PyPI wheels were unpacked and read, not run. Small stand-alone snippets were run: a pydantic coercion test, a pandas empty-frame test, argparse help rendering and a `dash` vs `bash` `source` test; the adversarial checks added a Python `str`-enum f-string test, a parse of `uv.lock` for cp312 Linux aarch64 wheels, and re-runs of the `dash` `source`, argparse and empty-DataFrame tests. No repository script, Dockerfile or notebook was executed, and no cloud resources were created, so no tuning job was run. Verified against the repos on 2026-10-13.
-- **Path convention:** unprefixed `_api_client.py`, `_common.py`, `_transformers.py` and `types.py` are google-genai 1.39.1 files (`google/genai/…`) unless another version is named; `_default.py` is google-auth. `trl/…`, `peft/…` and `transformers/…` paths are in those packages at the versions above. `cli.py`, `Dockerfile` and `docker-shell.sh` without a folder are the files of the container the surrounding step is about.
+  - `google-auth` 2.41.1, the version locked in `dataset-creator/uv.lock:502-503`; the captured traceback raises its "was not found" error at `google/auth/_default.py:173`
+  - for comparison only: `google-genai` 2.30.0 (not the version this repo locks)
+- **Method:** the PyPI wheels were unpacked and read; the tutorial's own commands ran only inside the capture's disposable containers. No cloud resources were created, so no tuning job was run. The digest was verified against the repos on 2026-10-13 and re-verified on 2026-10-31; the captures are from 2026-10-31.
+- **Path convention:** unprefixed `_api_client.py`, `_common.py`, `_transformers.py` and `types.py` are google-genai 1.39.1 files (`google/genai/…`) unless another version is named; `_default.py` is google-auth. `trl/…`, `peft/…` and `transformers/…` paths are in those packages at the versions above. `cli.py`, `Dockerfile` and `docker-shell.sh` without a folder are the files of the container the surrounding step is about. Capture files are cited by folder and number, e.g. `dataset-creator/05` = `assets/terminal/dataset-creator/05-generate.txt`.
 
 </details>
 
@@ -98,7 +102,7 @@ Lecture-only: multi-task fine-tuning (10), the GPT-4 training-cost aside (11–1
 
 **Lecture ideas you need for this tutorial**
 1. Fine-tuning usually means instruction fine-tuning: training on pairs of an instruction and its answer, sometimes with context. The tutorial's `instruct-dataset.csv` is the two-field case (slides 4–5).
-2. Tuning leaves habits you can see: a chat-tuned model opens with "Sure, here's…", where plain next-word prediction, the slides argue, would give just the haiku. The Pavlos openers are this on purpose (slides 7–8).
+2. Tuning leaves habits you can see: a chat-tuned model opens with "Sure, here's…", where plain next-word prediction, the slides argue, would give just the haiku. The persona's openers are this on purpose (slides 7–8).
 3. Full fine-tuning of a 10B model in FP16 needs about 120 GB: 20 GB of weights, 20 GB of gradients and 80 GB of FP32 Adam states (slides 13–15).
 4. LoRA freezes W₀ and learns ΔW = (α/r)·B·A in a branch beside it. B starts at zero, so training starts from the pretrained model. Here r = 8 and α = 16 (slides 22, 26–28).
 5. A low-rank pair has far fewer numbers than the matrix it updates, and only the pair trains. The slides' table treats a model as one layer; the notebook's exact count is 1,146,880 (slides 23–25, 31–35).
@@ -120,70 +124,76 @@ Lecture-only: multi-task fine-tuning (10), the GPT-4 training-cost aside (11–1
 
 ## Command checklist
 
-Commands in backticks are exactly as the README, the code or the notebook writes them (placeholders kept). Plain items are console clicks, file edits or notebook cells (nb cell N = 0-based index). Items marked *(extra)* are not in the tutorial; they come from §4 of this guide. All `python cli.py …` commands run **inside** the container that `docker-shell.sh` opens; items marked "host" run in a second terminal on your laptop. Track B (Colab) does not need GCP, so you can do it first.
+Commands in backticks are exactly as the README, the code or the notebook writes them (placeholders kept). Plain items are console clicks, file edits or notebook cells (nb cell N = 0-based index). Items marked *(extra)* are not in the tutorial; where they were captured, they are typed exactly as in the captures, and §4 shows their real output. All `python cli.py …` commands run **inside** the container that `docker-shell.sh` opens; items marked "host" run in a second terminal on your laptop. Track B (Colab) does not need GCP, so you can do it first.
 
 ### Prerequisites
 
 *Clone* (`README.md:31-34`)
-- [ ] `git clone https://github.com/dlops-io/llm-finetuning.git` — *(extra)* run it in the parent folder that will also hold `secrets/`; the README only links the repo (`README.md:34`).
-- [ ] `git -C llm-finetuning log -1 --oneline` — *(extra)* expect `44ef6f0 remove pipfile from gemini-finetuning`, or newer.
+- [ ] `git clone https://github.com/dlops-io/llm-finetuning.git` — *(extra)* run it in the parent folder that will also hold `secrets/` (the captures used `~/AC215`); the README only links the repo (`README.md:34`).
+- [ ] `cd llm-finetuning` — *(extra)*.
+- [ ] `git log -1 --format="%h %H%n%cd %s" --date=iso; git branch -a` — *(extra)* expect `44ef6f0 …` / `2026-10-05 22:52:07 -0400 remove pipfile from gemini-finetuning`, or newer; branches `main` and `pipenv`.
 
 *Setup GCP Service Account* (`README.md:38-69`; skip the SA and key if you have them from L05)
 - [ ] GCP Console → IAM & Admin → Service accounts: create `llm-service-account`.
 - [ ] In "Grant this service account access to project" select **Storage Admin** and **Agent Platform User** (formerly Vertex AI User; role ID `roles/aiplatform.user`).
 - [ ] Open the service account → **KEYS** tab → **ADD Key (Create New Key)** → **JSON**. The key file downloads.
-- [ ] Create a folder `secrets` **next to** the `llm-finetuning` repository (not inside it), copy the key into it and rename it to exactly `llm-service-account.json`.
-- [ ] `ls <parent>/secrets` — *(extra)* shows `llm-service-account.json`, not `…json.json`.
+- [ ] `cd ..` — *(extra)* back to the parent folder.
+- [ ] `mkdir secrets` — *(extra command for `README.md:50`, which says to create the folder **next to** the repository, not inside it)*. Move the key into it and rename it to exactly `llm-service-account.json` (not `llm-service-account.json.json`, `README.md:67`).
+- [ ] `ls -la; ls -la secrets` — *(extra)* `llm-finetuning` and `secrets` side by side; `secrets` lists your key (in the captures it is empty: no key exists there).
 
 ### Before the containers *(extra)*
 
-- [ ] Edit `env.dev`: `GCP_PROJECT` (`:6`), `GCS_BUCKET_NAME` (`:7`) and the project part of `GCP_SERVICE_ACCOUNT` (`:9`) — implied by the "CHANGE TO YOUR …" comments.
-- [ ] `gcloud services enable aiplatform.googleapis.com storage.googleapis.com` — *(extra)* enables Vertex AI and Cloud Storage; the README never says to.
-- [ ] `gcloud storage buckets create gs://<bucket> --location=us-central1` — *(extra)* `--upload` needs an existing bucket; use the same name as in `env.dev:7`.
+- [ ] `cat env.dev` — *(extra, in `llm-finetuning`)* the ten lines, with three "CHANGE TO YOUR …" comments.
+- [ ] Edit `env.dev`: `GCP_PROJECT` (`:6`) and `GCS_BUCKET_NAME` (`:7`); the project part of `GCP_SERVICE_ACCOUNT` (`:9`) is optional (no container reads it) — implied by the file's comments.
+- [ ] `gcloud services enable aiplatform.googleapis.com storage.googleapis.com` — *(extra)* enables the Vertex AI ("Agent Platform") and Cloud Storage APIs; the README never says to.
+- [ ] `gcloud storage buckets create gs://<bucket> --location=us-central1` — *(extra)* `--upload` needs an existing bucket; use the same name as in `env.dev:7`. Bucket names are global, and `cheese-dataset` belongs to the course.
 - [ ] `gcloud storage ls` — *(extra)* lists your bucket.
 - [ ] Edit `gemini-finetuner/cli.py:10-11` — *(extra; required)* replace `gs://cheese-dataset/...` with `gs://<bucket>/llm-finetune-dataset-small/train.jsonl` and `.../test.jsonl`. No rebuild needed: `/app` is a bind mount.
-- [ ] `mkdir -m 777 dataset-creator/data` — *(extra, host, Linux only)* lets the container user (uid 1000) write `data/` (§6.6).
+- [ ] `mkdir -m 777 dataset-creator/data` — *(extra, host, Linux only, if your uid is not 1000)* lets the container user (uid 1000) create files in `data/` (§6.6).
 
 ### Generate Question Answer Dataset
 
 *Run Container* (`README.md:79-94`)
 - [ ] `cd dataset-creator` — *(extra)* the README only says "Make sure you are inside the `dataset-creator` folder" (`README.md:83`).
-- [ ] `sh docker-shell.sh` — sources `../env.dev`, builds image `llm-dataset-creator`, opens an interactive bash in `/app`. On Ubuntu/Debian/WSL use `bash docker-shell.sh` (§6.1).
-- [ ] `ls -la /secrets` — the Prerequisites tip (`README.md:69`), run here because it needs the container: the key must be listed.
-- [ ] `which python` — *(extra)* `/.venv/bin/python`.
-- [ ] `python cli.py --help` — prints `usage: cli.py [-h] [--generate] [--prepare] [--upload]`.
-- [ ] `docker rm -f llm-dataset-creator` — *(extra, host)* only if you hit `Conflict. The container name "/llm-dataset-creator" is already in use`.
+- [ ] `sh docker-shell.sh` — sources `../env.dev`, builds image `llm-dataset-creator`, prints the banner and opens a bash prompt `app@<container-id>:/app$`. **On Debian/Ubuntu/WSL it fails** with `docker-shell.sh: 8: source: not found`: run `bash docker-shell.sh` instead (§6.1). macOS's `sh` accepts it.
+- [ ] `ls -la /secrets` — the Prerequisites tip (`README.md:69`), run here because it needs the running container: the key must be listed (the captures show `total 0`, only `.` and `..`).
+- [ ] `python cli.py --help` — prints `usage: cli.py [-h] [--generate] [--prepare] [--upload]`; works even without a key.
+- [ ] `docker ps` — *(extra, host)* the container `llm-dataset-creator`, `PORTS` empty.
+- [ ] `docker images` — *(extra, host)* `llm-dataset-creator:latest` 1.64GB.
+- [ ] `docker rm -f llm-dataset-creator` — *(extra, host)* only if you hit `Conflict. The container name "/llm-dataset-creator" is already in use`, and only if no shell of yours is still using it.
 - [ ] `docker exec -it llm-dataset-creator bash` — *(extra, host)* a second shell into the running container; it skips the entrypoint, so run the next item first.
-- [ ] `source /.venv/bin/activate` — *(extra)* in that second shell, otherwise `python cli.py` fails with `ModuleNotFoundError`.
+- [ ] `source /.venv/bin/activate` — *(extra)* in that second shell, otherwise `python cli.py` fails with `ModuleNotFoundError: No module named 'pandas'`.
 
 *Generate Text* (`README.md:98-155`)
-- [ ] `python cli.py --generate` — 5 Gemini calls → `data/cheese_qa_0.txt` … `cheese_qa_4.txt`. Errors are printed per batch, not raised: read every line.
-- [ ] `ls dataset-creator/data` — *(extra, host)* five `cheese_qa_*.txt` files, each a JSON array of ~20 objects.
+- [ ] `python cli.py --generate` — 5 Gemini calls (billed, cents) → `data/cheese_qa_0.txt` … `cheese_qa_4.txt`. Errors are printed per batch, not raised: without a key it prints five `Error occurred while generating content: File /secrets/llm-service-account.json was not found.` lines and still exits 0. Read every line.
+- [ ] `ls -la data` — *(extra)* five `cheese_qa_*.txt` files, each a JSON array of ~20 objects (empty after a failed run).
 - [ ] Optional, for a larger dataset: change `NUM_ITERATIONS = 5` (`README.md:154`; in the code at `dataset-creator/cli.py:170`) and re-run `python cli.py --generate`. The README's "default parameters" (`README.md:106`) are module constants, not CLI flags.
 
 *Sample Question Answers* (`README.md:159-175`)
 - [ ] Open one `data/cheese_qa_*.txt` and compare it with the README sample. Expect different openers (§6.8).
 
 *Prepare Dataset* (`README.md:179-212`)
-- [ ] `python cli.py --prepare` — dedupe, 90/10 split; writes `instruct-dataset.csv`, `train.csv`/`test.csv`, `train.jsonl`/`test.jsonl`. Expect `Number of errors: 0`.
-- [ ] `head -c 300 data/train.jsonl` — *(extra)* `{"contents":[{"role":"user","parts":[{"text":"...`.
-- [ ] `wc -l data/*.jsonl` — *(extra)* one line per example.
+- [ ] `python cli.py --prepare` — dedupe, 90/10 split; writes `instruct-dataset.csv`, `train.csv`/`test.csv`, `train.jsonl`/`test.jsonl`. Expect `Number of errors: 0` and `Shape: (N, 2)`. After a failed `--generate` it crashes with `KeyError: 'question'` (§6.3).
+- [ ] `ls -la data; wc -l data/*.jsonl data/*.csv` — *(extra)* the five outputs; one JSONL line per example.
+- [ ] `head -c 400 data/train.jsonl; echo` — *(extra)* `{"contents":[{"role":"user","parts":[{"text":"...`.
+- [ ] `head -1 data/train.jsonl | python -m json.tool` — *(extra)* the same nesting as the README's format block (`README.md:191-212`).
 
 *Upload Dataset* (`README.md:216-222`)
-- [ ] `python cli.py --upload` — five files to `gs://$GCS_BUCKET_NAME/llm-finetune-dataset-small/`.
+- [ ] `python cli.py --upload` — five files to `gs://$GCS_BUCKET_NAME/llm-finetune-dataset-small/`. Without a key it fails loudly with `google.auth.exceptions.DefaultCredentialsError: File /secrets/llm-service-account.json was not found.`
 - [ ] `gcloud storage ls gs://<bucket>/llm-finetune-dataset-small/` — *(extra, host)* the five objects.
-- [ ] `python cli.py --generate --prepare --upload` — *(extra)* the flags combine and run in that order (`cli.py:300-307`).
+- [ ] `python cli.py --generate --prepare --upload` — *(extra)* the flags combine and always run in that order (`cli.py:300-307`).
 
 ### Fine-tune Gemini
 
 *Run Container* (`README.md:232-247`)
-- [ ] `exit` — *(extra)* leave the dataset container (`--rm` deletes it).
-- [ ] `cd ../gemini-finetuner` — *(extra)* the README only says "Make sure you are inside the `gemini-finetuner` folder" (`README.md:236`).
-- [ ] `sh docker-shell.sh` — builds image `gemini-finetuner` (fast: the layers up to `uv sync` are cached). `bash docker-shell.sh` on dash systems.
+- [ ] `exit` — *(extra)* leave the dataset container (`--rm` deletes it; `docker ps -a` is then empty).
+- [ ] `cd ../gemini-finetuner && pwd && ls` — *(extra)* the README only says "Make sure you are inside the `gemini-finetuner` folder" (`README.md:236`).
+- [ ] `sh docker-shell.sh` — builds image `gemini-finetuner` (`Building 0.0s`: every layer up to `uv sync` is cached) and opens its prompt. On dash systems: `bash docker-shell.sh` (here the error says line 7).
 - [ ] `python cli.py --help` — prints `usage: cli.py [-h] [--train] [--chat]`.
+- [ ] `grep -n 'gs://' cli.py` — *(extra)* lines 10-11 must show your bucket, not `cheese-dataset`.
 
 *Fine-tune Model* (`README.md:251-261`)
-- [ ] `python cli.py --train` — submits the tuning job and prints `Job name: projects/<project-number>/locations/us-central1/tuningJobs/<id>`; after ~60 s it prints `Tuned model info: None` (normal) and exits.
+- [ ] `python cli.py --train` — submits the tuning job (billed); by the code it prints `Job name: projects/<project-number>/locations/us-central1/tuningJobs/<id>`, waits 60 s, prints `Tuned model info: None` (normal) and exits. Without a key it stops at `DefaultCredentialsError` after an `ExperimentalWarning`; nothing is sent.
 - [ ] Console: [Agent Platform (formerly Vertex AI) → Tuning](https://console.cloud.google.com/agent-platform/tuning/managed). Watch the job until **Succeeded**, and check that its dataset URI is your bucket.
 - [ ] Optional *(extra)*: change `gemini-finetuner/cli.py:126` to `train(wait_for_job=True)` so the CLI polls every minute.
 
@@ -192,23 +202,24 @@ Commands in backticks are exactly as the README, the code or the notebook writes
 
 *Chat with Fine-tuned Model* (`README.md:282-316`)
 - [ ] *(extra; required)* Copy your tuned model's endpoint (`projects/<num>/locations/us/endpoints/<id>`) from the console into `MODEL_ENDPOINT` at `gemini-finetuner/cli.py:107`.
-- [ ] `python cli.py --chat` — asks "How is cheese made in Greece? Answer pavlos style?" and prints `Fine-tuned LLM Response: …`.
-- [ ] Optional: try the hosted [Pavlos Cheese Model](https://ac215-llm-rag.dlops.io/finetunechat) (Chrome recommended).
+- [ ] `python cli.py --chat` — asks "How is cheese made in Greece? Answer ‹instructor› style?" and prints `Fine-tuned LLM Response: …`. Without a key: `DefaultCredentialsError`.
+- [ ] Optional: try the hosted cheese model at <https://ac215-llm-rag.dlops.io/finetunechat> (the README recommends Chrome; may not be live).
 - [ ] Console: on the job's detail page, look at the "Training Monitor" curves and the "Data distribution" tab.
 
 ### Clean up Track A *(extra)*
 
+- [ ] `exit` — *(extra)* leave the `gemini-finetuner` container.
+- [ ] `docker image rm llm-dataset-creator gemini-finetuner` — *(extra, host)* removes both images (2 × 1.64 GB).
 - [ ] `gcloud storage rm -r gs://<bucket>/llm-finetune-dataset-small` — *(extra)* or delete the bucket.
 - [ ] *(extra)* Console: delete the tuned model/endpoint (Agent Platform / Vertex AI → Tuning, Model Registry, Endpoints), after L10 if you use it in `cheese-app-v0`.
 - [ ] *(extra)* Delete old service-account keys you no longer use.
-- [ ] `docker image rm llm-dataset-creator gemini-finetuner` — *(extra, host)* removes both images.
 - [ ] `uv remove chromadb langchain langchain-community openai openai-agents` — *(extra, optional)* trims the unused dependencies before a rebuild (§6.9).
 
 ### Colab: Tutorial - Finetuning with QLoRA
 
 *Part A: Setup / Environment* (nb cells 1-16)
 - [ ] File → Save a copy in Drive; Runtime → Change runtime type → GPU (T4 is fine) (nb cells 1-2).
-- [ ] `!uv pip install transformers==5.16.1 tokenizers==0.23.1 huggingface-hub==1.29.0 bitsandbytes==0.50.2` — nb cell 8.
+- [ ] `!uv pip install transformers==5.16.1 tokenizers==0.23.1 huggingface-hub==1.29.0 bitsandbytes==0.50.2` — nb cell 8 (section 3).
 - [ ] `!uv pip install trl==1.14.0` — nb cell 8.
 - [ ] `!uv pip uninstall torchao` — nb cell 8; do not skip it (§6.13).
 - [ ] Colab Secrets (key icon): add `HF_TOKEN` and turn on "Notebook access" (nb cell 9).
@@ -246,10 +257,10 @@ Commands in backticks are exactly as the README, the code or the notebook writes
 
 ## 1. What you build
 
-This lecture has two tracks. Both teach a model to answer "Pavlos style", e.g. "Yello - this is Pavlos your cheese monker…" (the README's sample output and the Colab dataset). The *current* generator prompt's list of openers no longer includes "Yello…"; it asks for openers like "Good question", "Glad you ask" and "I have slides for that" (`dataset-creator/cli.py:84-89`). The sample JSON at the end of the same prompt still opens its three example answers with the old phrases "Welcome welcome welcome, cheese lovers!…", "Yello - this is Pavlos your cheese monker…" and "Welcome welcome to AC215…" (`dataset-creator/cli.py:133`, `:137`, `:140`), so generated data may still use them.
+This lecture has two tracks. Both teach a model to answer in the instructor's voice ("‹instructor› style"), e.g. "Yello - this is ‹instructor› your cheese monker…" (the README's sample output and the Colab dataset). The *current* generator prompt's list of openers no longer includes "Yello…"; it asks for openers like "Good question", "Glad you ask" and "I have slides for that" (`dataset-creator/cli.py:84-89`). The sample JSON at the end of the same prompt still opens its three example answers with the old phrases "Welcome welcome welcome, cheese lovers!…", "Yello - this is ‹instructor› your cheese monker…" and "Welcome welcome to AC215…" (`dataset-creator/cli.py:133`, `:137`, `:140`), so generated data may still use them.
 
 - **Track A (the repo, managed fine-tuning)** runs two Docker containers on your laptop.
-  - In `dataset-creator`, `cli.py --generate` asks Gemini (`gemini-3.1-flash-lite`, `location="global"`) five times for 20 cheese Q&A pairs in Pavlos' voice. A JSON schema forces the format.
+  - In `dataset-creator`, `cli.py --generate` asks Gemini (`gemini-3.1-flash-lite`, `location="global"`) five times for 20 cheese Q&A pairs in the instructor's voice. A JSON schema forces the format.
   - `--prepare` deduplicates the pairs and splits them 90/10. It writes CSVs plus Gemini-format `train.jsonl`/`test.jsonl`.
   - `--upload` copies everything to `gs://<your bucket>/llm-finetune-dataset-small/`.
   - In `gemini-finetuner`, `cli.py --train` submits a **supervised tuning job** to Vertex AI (now branded "Agent Platform") in `us-central1`. Google trains a small adapter on top of `gemini-3.1-flash-lite` on its own hardware. The result is a **tuned-model endpoint** in *your* project (`projects/<num>/locations/us/endpoints/<id>`).
@@ -259,7 +270,7 @@ This lecture has two tracks. Both teach a model to answer "Pavlos style", e.g. "
 - **Track B (Colab, open-source PEFT)** runs on a Colab GPU. It:
   - loads `Qwen/Qwen3-0.6B` in **4-bit NF4** with bitsandbytes
   - attaches **LoRA** adapters (r=8 on `q_proj`/`v_proj`, which makes 1,146,880 trainable numbers, 0.30% of the stored parameters)
-  - trains for 2 epochs (450 steps, about 3.5 minutes on an A100) on 900 Pavlos Q&As sampled from a 16k-example file in the same Gemini JSONL format Track A produces
+  - trains for 2 epochs (450 steps; 3 min 36 s in the recorded A100 run) on 900 persona Q&As sampled from a 16k-example file in the same Gemini JSONL format Track A produces
   - compares loss and perplexity with the adapter switched off and on (stored: 2.65 → 1.39 loss, 14.15 → 4.00 perplexity)
   - saves a 4.6 MB adapter and a 1.2 GB merged FP16 model to Google Drive, optionally pushing it to a private Hugging Face repo
 
@@ -352,7 +363,7 @@ The tuned Gemini endpoint from Track A is used again in L10 (`cheese-app-v0`, `/
 | `GCP_PROJECT` | `"ac215-project"`, **change it** | `env.dev:6`; required, `os.environ["GCP_PROJECT"]` at `dataset-creator/cli.py:17` and `gemini-finetuner/cli.py:9` |
 | `GCS_BUCKET_NAME` | `"cheese-dataset"`, **change it** (bucket names are global and this one belongs to the course) | `env.dev:7`; required by `dataset-creator/cli.py:21`. Passed to gemini-finetuner but **not read there** |
 | Training data URIs (Gemini) | `gs://cheese-dataset/llm-finetune-dataset-small/{train,test}.jsonl`, **hard-coded; edit them** | `gemini-finetuner/cli.py:10-11` |
-| Tuned endpoint for `--chat` | `projects/129349313346/locations/us/endpoints/7655908260297310208`, the **instructor's endpoint; replace with yours** | `gemini-finetuner/cli.py:107` |
+| Tuned endpoint for `--chat` | `projects/‹instructor-project-number›/locations/us/endpoints/‹endpoint-id›`, the **instructor's endpoint; replace with yours** | `gemini-finetuner/cli.py:107` |
 | `GCP_SERVICE_ACCOUNT`, `LOCATION` | defined but unused by these two containers | `env.dev:9-10` (only `autotrain-runner/docker-shell.sh:20` passes `GCP_SERVICE_ACCOUNT`) |
 | Code inside the container | `/app` is a **bind mount** of the folder you ran the script from, so host edits are live without a rebuild | `-v "$BASE_DIR":/app` (`docker-shell.sh:17` / `:16`), `BASE_DIR=$(pwd)` (`env.dev:4`) |
 | Python venv | `/.venv`, outside `/app` so the bind mount doesn't hide it | `ENV UV_PROJECT_ENVIRONMENT=/.venv` (`Dockerfile:18`) |
@@ -393,18 +404,18 @@ Then put that name in `env.dev:7` **and** in `gemini-finetuner/cli.py:10-11`.
 
 ### 3.1 Prompting vs RAG vs fine-tuning: style is learnable, facts are not guaranteed
 - **Explanation.** There are three ways to change what an LLM says:
-  1. **Prompting** changes the *input* each time: a system prompt asking for "Pavlos style".
+  1. **Prompting** changes the *input* each time: a system prompt asking for the instructor's voice.
   2. **RAG** (L05) adds retrieved text to the input. It gives the model facts it can quote, and no weights change.
   3. **Fine-tuning** changes the *weights*. You show the model many (input, desired output) pairs and nudge its parameters so those outputs become more likely.
 
   Fine-tuning is best at **behaviour**: tone, persona, format, length, domain vocabulary. It's unreliable for injecting **new facts**.
 - **Evidence from the stored run** (nb cell 82 output, prompt "Why is the sky blue?", greedy decoding):
   - Base model: "**Light Refraction**: When sunlight enters the atmosphere, it bends (refracts)…"
-  - Fine-tuned model: "Yello - this is Pavlos your cheese monker, ready to unravel the mystery of the sky's blue! … The blue color of the sky is due to the scattering of light by the water molecules in the atmosphere."
+  - Fine-tuned model: "Yello - this is ‹instructor› your cheese monker, ready to unravel the mystery of the sky's blue! … The blue color of the sky is due to the scattering of light by the water molecules in the atmosphere."
   - The persona transferred to a non-cheese question. The physics didn't improve; both (truncated) answers contain a physics error: the base model leads with refraction, the fine-tuned one blames water molecules (the real answer is Rayleigh scattering by N₂/O₂ molecules). The two columns are also different models: an FP16 base vs the 4-bit fine-tuned one (§3.8).
 - **Mental model.** Fine-tuning moves the model's *default voice*. RAG changes the *open book on the desk*.
-- **Analogy.** Accent coaching vs handing someone notes. After coaching, they sound like Pavlos on any topic, but they don't know more.
-- **Common misconception.** "Fine-tune on my documents and the model will know them." It learns how the documents *sound* much faster than what they *say*. And the deployed L10 app combines both: its "Pavlos Cheese Model" page is "the same RAG flow as Chat, answered by a fine-tuned model" (`cheese-app-v0/README.md:245`), and the API sends the prompt plus the RAG system instruction to the tuned endpoint (`cheese-app-v0/api-service/api/routers/rag.py:110-120`).
+- **Analogy.** Accent coaching vs handing someone notes. After coaching, they sound like the instructor on any topic, but they don't know more.
+- **Common misconception.** "Fine-tune on my documents and the model will know them." It learns how the documents *sound* much faster than what they *say*. And the deployed L10 app combines both: its fine-tuned cheese-model page is "the same RAG flow as Chat, answered by a fine-tuned model" (`cheese-app-v0/README.md:245`), and the API sends the prompt plus the RAG system instruction to the tuned endpoint (`cheese-app-v0/api-service/api/routers/rag.py:110-120`).
 
 ### 3.2 Synthetic instruction data: an LLM teacher writes the curriculum
 - **Explanation.** `dataset-creator/cli.py` uses a strong model to *manufacture* training data. It has three parts:
@@ -423,7 +434,7 @@ Then put that name in `env.dev:7` **and** in `gemini-finetuner/cli.py:10-11`.
   2. **Plain text:** `"human: …\nbot: …"` in `train.csv`/`test.csv` (`cli.py:241-247`, `:263-264`). Track A doesn't use it; it suits the old HF/AutoTrain path (`autotrain-runner/configs/llm_config_mistral.yaml:12-13` reads a `text` column).
   3. **Gemini JSONL:** one line per example, `{"contents":[{"role":"user","parts":[{"text":…}]},{"role":"model","parts":[{"text":…}]}]}` (`cli.py:249-257`, `:270-273`). Gemini's tuning service reads this.
   4. **Chat-template text** (Track B): `tokenizer.apply_chat_template` turns the turns into Qwen3's special-token layout. Stored example (nb cell 63): `<|im_start|>user\nCan you explain the process of 'affioratura' …<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nWelcome welcome, cheese lovers! …<|im_end|>`. The empty `<think></think>` block is Qwen3's "answer without thinking" layout (nb cell 58).
-- **Why the template matters.** At inference, `generate_response` builds the prompt with the same template plus `add_generation_prompt=True` **and `enable_thinking=False`** (nb cell 82:19, :22-27). With thinking disabled, Qwen3's template ends the prompt with `<|im_start|>assistant\n<think>\n\n</think>\n\n`, exactly the prefix every training answer had, so the model continues straight into the answer. The model has learned "after `<|im_start|>assistant` comes a Pavlos answer, then `<|im_end|>`". A mismatched template at training vs inference is a classic silent failure.
+- **Why the template matters.** At inference, `generate_response` builds the prompt with the same template plus `add_generation_prompt=True` **and `enable_thinking=False`** (nb cell 82:19, :22-27). With thinking disabled, Qwen3's template ends the prompt with `<|im_start|>assistant\n<think>\n\n</think>\n\n`, exactly the prefix every training answer had, so the model continues straight into the answer. The model has learned "after `<|im_start|>assistant` comes a persona answer, then `<|im_end|>`". A mismatched template at training vs inference is a classic silent failure.
 - **The EOS detail.** `.removesuffix("\n")` (nb cell 59:13) makes every example end in `<|im_end|>`, Qwen3's EOS token (`eos_token_id` 151645, nb cell 42 output). TRL's "Adding EOS" pass appends EOS only when the text doesn't already end with it (`trl/trainer/sft_trainer.py:1524-1526` in trl 1.14.0), so the model learns to stop exactly once.
 - **Mental model.** A conveyor belt. The same Q&A pair gets repackaged at each station, and only the last package (token IDs) reaches the GPU.
 - **Common misconception.** "The model sees the question and answer as two fields." It sees one token stream. With a plain `text` dataset, TRL computes loss on **every** token, question included; `completion_only_loss` applies only to prompt/completion datasets (`trl/trainer/sft_config.py:96`). The notebook says the same about its evaluation (nb cell 79).
@@ -448,7 +459,7 @@ Then put that name in `env.dev:7` **and** in `gemini-finetuner/cli.py:10-11`.
 ### 3.5 Quantization: 16 buckets per weight (NF4, double quantization, compute dtype)
 - **Explanation.** Loading with `BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type="nf4", bnb_4bit_use_double_quant=True, bnb_4bit_compute_dtype=...)` (nb cell 18:7-12, nb cell 34:1-6) replaces each `nn.Linear` with `Linear4bit` (nb cell 21 output for OPT-350m: `(q_proj): Linear4bit(in_features=1024, out_features=1024, bias=True)`; its `lm_head` stays `Linear`). It has three parts:
   - **The storage format.** Each weight is replaced by a 4-bit index into **16 levels**, scaled per small block of weights by an "absmax" constant.
-  - **NF4 ("NormalFloat4").** Its 16 levels are spaced so that each is equally likely for normally distributed weights: denser near 0, sparser in the tails (QLoRA paper). The bitsandbytes default is FP4 (nb cell 28).
+  - **NF4 ("NormalFloat4").** Its 16 levels are placed at quantiles of a standard normal (rescaled to [-1, 1]), so for normally distributed weights each bucket catches roughly the same share: denser near 0, sparser in the tails. It is slightly asymmetric (8 positive levels, 7 negative, plus an exact 0) so that zero is represented exactly (QLoRA paper). The bitsandbytes default is FP4 (nb cell 28), a tiny float format (sign, 2 exponent bits, 1 mantissa bit) whose levels are also non-uniform but not matched to a bell curve.
   - **Double quantization** quantizes the per-block constants themselves. Per the QLoRA paper, that saves about 0.37 bits per parameter: roughly 20 MB on Qwen3-0.6B's 440 M quantized weights.
   - **Compute dtype** is what the weights are *dequantized to* for each matmul: `float16` here, so it also works on T4s, which lack fast bf16 (nb cell 30-31).
 - **What gets quantized.** The stored run shows it isn't everything:
@@ -496,9 +507,9 @@ Then put that name in `env.dev:7` **and** in `gemini-finetuner/cli.py:10-11`.
     Fine-tuned (4-bit + LoRA)   1.3872        4.00
     ```
   - Training loss fell from 2.007381 at step 50 to 1.350437 at step 450 (nb cell 75 HTML table).
-  - Qualitatively (nb cell 82), every fine-tuned answer opens with a Pavlos phrase: the two cheese answers with "Welcome welcome welcome, cheese lovers! This is your lecturer Pavlos Protopapas here…", the sky answer with "Yello - this is Pavlos your cheese monker…".
+  - Qualitatively (nb cell 82), every fine-tuned answer opens with a persona phrase: the two cheese answers with "Welcome welcome welcome, cheese lovers! This is your lecturer ‹instructor› here…", the sky answer with "Yello - this is ‹instructor› your cheese monker…".
 - **Track A.** The console shows the same kind of curves for Gemini: "Total loss" and "Fraction of correct next step preds" for training and validation (`README.md:310-316`, `images/training-1.png`).
-- **Mental model.** Perplexity measures how *surprised* the model is by Pavlos-style text. The drop from 14 to 4 says "now this style is what it expects", not "now it's more correct".
+- **Mental model.** Perplexity measures how *surprised* the model is by persona-style text. The drop from 14 to 4 says "now this style is what it expects", not "now it's more correct".
 - **Common misconceptions.**
   - "Lower perplexity = better answers." Here the loss counts every token, including the question and chat-template tokens (nb cell 79). It mostly measures style fit: compare the sky-blue answer in §3.1.
   - In 5.2 the "Base Model" column is an **FP16, unquantized** Qwen (nb cell 82:55-61, `quantization_config` commented out), while 5.1's base is the 4-bit model with its adapter off. These are two different baselines.
@@ -509,27 +520,65 @@ Then put that name in `env.dev:7` **and** in `gemini-finetuner/cli.py:10-11`.
 
 Commands in code spans are verbatim from the README, code or notebook unless marked *(extra)*. Track A runs on your laptop; Track B runs in Colab, and you can do it first if you have no GCP access yet.
 
+**About the outputs below.** Terminal blocks are real, trimmed (first and last lines, with `…` between) from the 2026-10-31 captures in the video folder's `assets/terminal/` (the file is named with each block; `[exit N]` lines are omitted and the exit status is given in the text where it matters). They ran on a fresh Linux Docker "laptop" **without a service-account key**, so the commands that reach Google show their real no-key failure; that failure is the one you see if your key is missing. Blocks labelled **expected** quote what the README documents for a working run; blocks labelled **recorded** are the Colab notebook's stored outputs from the course staff's A100 run; **scripted** marks hand-written stand-in data. Differences you will see on your own machine:
+- Your user, host and container ids differ (`student`, `~/AC215`, `app@6f5113cdb660`, `app@2a2550dec953` are the capture's).
+- The capture laptop's `/bin/sh` was BusyBox `ash`, which accepts `source` like macOS's `sh`. On Debian/Ubuntu/WSL `sh docker-shell.sh` fails (Step 4).
+- The first build took 45.1 s with a fast network; expect several minutes with Docker Desktop.
+- Files the capture wrote show modes such as `-rw-rw-rw-` (the capture ran with umask 000); with the usual umask you see `-rw-r--r--`.
+
 ### Part 0: before you start (Track A)
 
 **Step 0. Clone, folder layout, key** (`README.md:31-69`).
-- **Action:** in some parent folder:
+- **Action:** in some parent folder (here `~/AC215`):
   1. `git clone https://github.com/dlops-io/llm-finetuning.git` *(extra; the README only links the repo, `README.md:34`)*.
   2. In the GCP Console (IAM & Admin → Service accounts), create `llm-service-account`, grant **Storage Admin** and **Agent Platform User** (`roles/aiplatform.user`), then on its **KEYS** tab use **ADD Key → Create New Key → JSON** to download a key (`README.md:40-49`). Skip this if you already have this SA from L05.
-  3. Create `secrets/` **next to** the repo and put the key there as `llm-service-account.json` (`README.md:50`). The layout must match `README.md:54-62`.
+  3. `mkdir secrets` **next to** the repo *(the README gives no command, `README.md:50`)*, and put the key there as `llm-service-account.json`. The layout must match `README.md:54-62`.
+- **Captured** (`laptop/01`, `02`, `06`):
+  ```
+  $ git clone https://github.com/dlops-io/llm-finetuning.git
+  Cloning into 'llm-finetuning'...
+  $ git log -1 --format="%h %H%n%cd %s" --date=iso; git branch -a
+  44ef6f0 44ef6f0a70315aa0a551b8565ca862679a87c1eb
+  2026-10-05 22:52:07 -0400 remove pipfile from gemini-finetuning
+  * main
+  …
+    remotes/origin/pipenv
+  $ ls -la; ls -la secrets
+  …
+  drwxr-xr-x 7 student student 200 Oct 31 02:35 llm-finetuning
+  drwxr-xr-x 2 student student  40 Oct 31 02:35 secrets
+  total 0
+  drwxr-xr-x 2 student student 40 Oct 31 02:35 .
+  …
+  ```
+  The capture's `secrets/` stays empty on purpose (no key exists there); yours lists `llm-service-account.json`, not `…json.json` (`README.md:67`). Each container folder holds six files: `Dockerfile cli.py docker-entrypoint.sh docker-shell.sh pyproject.toml uv.lock` (`laptop/03`); there is no `data/` folder until the container makes one.
 - **Under the hood:** `env.dev:5` computes `SECRETS_DIR=$(pwd)/../../secrets/`. `$(pwd)` is evaluated when the script sources it, while you're inside `dataset-creator/` or `gemini-finetuner/`, so `../../secrets` is `<parent>/secrets`. That's the same folder L05's `docker-compose.yml` mounts as `../secrets` from the repo root.
-- **Checkpoint:** *(extra)* `ls <parent>/secrets` shows `llm-service-account.json`, not `…json.json` (`README.md:67`). *(extra)* `git -C llm-finetuning log -1 --oneline` shows `44ef6f0 remove pipfile from gemini-finetuning`, or newer.
 - **If it fails:** a key inside the repo would be ignored by `.gitignore:7` (`*.json`), but it would **not be mounted**. Move it.
 
 **Step 1. Edit `env.dev`** *(implied by the "CHANGE TO YOUR …" comments)*.
-- **Action:** set `GCP_PROJECT` (`env.dev:6`), `GCS_BUCKET_NAME` (`:7`) and the project part of `GCP_SERVICE_ACCOUNT` (`:9`).
+- **Captured** (`laptop/04`, `cat env.dev` *(extra)*):
+  ```
+  export BASE_DIR=$(pwd)
+  export SECRETS_DIR=$(pwd)/../../secrets/
+  export GCP_PROJECT="ac215-project" # CHANGE TO YOUR PROJECT ID
+  export GCS_BUCKET_NAME="cheese-dataset" # CHANGE TO YOUR PROJECT BUCKET
+  export GOOGLE_APPLICATION_CREDENTIALS="/secrets/llm-service-account.json"
+  …
+  ```
+- **Action:** set `GCP_PROJECT` (`env.dev:6`) and `GCS_BUCKET_NAME` (`:7`) to yours. `GCP_SERVICE_ACCOUNT` (`:9`) also says "CHANGE", but neither container receives it.
 - **Under the hood:** `docker-shell.sh` exports these and passes three of them into the container with `-e` (`dataset-creator/docker-shell.sh:19-21`).
 
 **Step 2. Enable the API and create the bucket** *(extra; not in the README)*.
 - **Action:** `gcloud services enable aiplatform.googleapis.com storage.googleapis.com`, then `gcloud storage buckets create gs://<bucket> --location=us-central1`.
-- **Checkpoint:** `gcloud storage ls` lists your bucket.
+- **Checkpoint:** `gcloud storage ls` lists your bucket. (Not captured: no GCP account.)
 
 **Step 3. Point the Gemini trainer at your bucket** *(extra; required)*.
 - **Action:** edit `gemini-finetuner/cli.py:10-11`, replacing `gs://cheese-dataset/...` with `gs://<bucket>/llm-finetune-dataset-small/train.jsonl` and `.../test.jsonl`. The lines say "# Replace with your dataset".
+- **Captured** before the edit (`gemini-finetuner/04`, `grep -n 'gs://' cli.py` *(extra)*):
+  ```
+  10:TRAIN_DATASET = "gs://cheese-dataset/llm-finetune-dataset-small/train.jsonl"  # Replace with your dataset
+  11:VALIDATION_DATASET = "gs://cheese-dataset/llm-finetune-dataset-small/test.jsonl"  # Replace with your dataset
+  ```
 - **Why now:** `/app` is a bind mount, so editing on the host is enough. There's no rebuild.
 
 ### Part A: Generate Question Answer Dataset (`README.md:75-222`)
@@ -542,27 +591,60 @@ Commands in code spans are verbatim from the README, code or notebook unless mar
      - starts from `python:3.12-slim-bookworm` (`Dockerfile:2`)
      - apt-installs `build-essential curl libpq5` (`:4`, `:22-28`), then `pip install uv` (`:30`)
      - creates user `app` (uid 1000, `:31`)
-     - copies `pyproject.toml uv.lock*` (`:42`) and runs `uv sync --frozen` (`:45`). That installs exactly the versions `uv.lock` pins into `/.venv` (`:18`). The lock has 136 `[[package]]` entries, but on Linux the Windows-only `pywin32` and `pyreadline3` (both behind `sys_platform == 'win32'` markers, `uv.lock:801`, `:1089`) are skipped and the virtual project `app` itself (`source = { virtual = "." }`, `uv.lock:106-108`) is not installed as a package.
+     - copies `pyproject.toml uv.lock*` (`:42`) and runs `uv sync --frozen` (`:45`). That installs exactly the versions `uv.lock` pins into `/.venv` (`:18`). The lock has 136 `[[package]]` entries; on Linux the Windows-only `pywin32` and `pyreadline3` are skipped and the virtual project `app` itself is not installed, so the capture's build log says `Installed 133 packages`.
      - copies the source (`:48`)
   4. `docker run --rm --name … -ti` (`:16-22`) mounts the folder and the secrets and starts `docker-entrypoint.sh`.
-- **Checkpoint:** the entrypoint prints (`docker-entrypoint.sh:3-12`):
+- **Captured** (`laptop/07`, the build in an 80-column terminal, then the banner and the prompt):
   ```
+  $ sh docker-shell.sh
+
+  [+] Building 45.1s (11/11) FINISHED                              docker:default
+   => [internal] load build definition from Dockerfile                       0.0s
+  …
+   => [1/6] FROM docker.io/library/python:3.12-slim-bookworm                 0.0s
+  …
+   => [2/6] RUN set -ex;     for i in $(seq 1 8); do mkdir -p "/usr/share/  26.0s
+   => [3/6] WORKDIR /app                                                     0.0s
+   => [4/6] COPY --chown=app:app pyproject.toml uv.lock* ./                  0.0s
+   => [5/6] RUN uv sync --frozen                                             9.0s
+   => [6/6] COPY --chown=app:app . ./                                        0.0s
+  …
+   => => naming to docker.io/library/llm-dataset-creator                     0.0s
   Container is running!!!
-  Architecture: x86_64            (aarch64 on Apple Silicon)
+  Architecture: x86_64
   Environment ready! Virtual environment activated.
-  Python version: Python 3.12.x
-  UV version: uv <version>        (whatever `pip install uv` fetched at build time; not pinned)
+  Python version: Python 3.12.16
+  UV version: uv 0.13.6 (x86_64-unknown-linux-gnu)
   Activating virtual environment...
+  app@6f5113cdb660:/app$
   ```
-  Then you get an interactive bash in `/app`, like `app@<container-id>:/app$`. The venv's `(app)` prefix (from `name = "app"`, `pyproject.toml:2`) may not show, because the new bash started by `exec /bin/bash` (`:15`) re-reads Debian's bashrc, which resets `PS1`; the same happens in L02. The venv is still active through the exported `PATH`. *(extra)* Check with `which python` → `/.venv/bin/python`. The "activated" line prints *before* activation happens (`:6` vs `:12`), which is cosmetic. `ls -la /secrets` should list the key (`README.md:69`).
+  On Apple Silicon the architecture line says `aarch64` (not captured). The venv's `(app)` prefix does not show, because the new bash started by `exec /bin/bash` (`docker-entrypoint.sh:15`) re-reads Debian's bashrc, which resets `PS1`. The venv is still active through the exported `PATH`: *(extra)* `which python` → `/.venv/bin/python` (`dataset-creator/00`). The "activated" line prints *before* activation happens (`:6` vs `:12`), which is cosmetic.
+- **Check the key** (`README.md:69`; captured `dataset-creator/01`, here with **no** key):
+  ```
+  $ ls -la /secrets
+  total 0
+  drwxr-xr-x 2 app  app  40 Oct 31 02:35 .
+  drwxr-xr-x 1 root root 60 Oct 31 02:36 ..
+  ```
+  Yours must list `llm-service-account.json`. An empty listing is the "file not found" case the README warns about (`README.md:64`): the commands that reach Google will fail (Steps 6, 8, 10, 12).
+- **Extras from a second laptop terminal** (`laptop/08`, `09`, `10`): `docker ps` shows the container `llm-dataset-creator` with `PORTS` empty; `docker images` shows `llm-dataset-creator:latest` at **1.64GB**; `docker inspect` shows the two bind mounts and three variables:
+  ```
+  /home/student/AC215/llm-finetuning/dataset-creator -> /app
+  /home/student/AC215/secrets -> /secrets
+
+  GCP_PROJECT=ac215-project
+  GCS_BUCKET_NAME=cheese-dataset
+  GOOGLE_APPLICATION_CREDENTIALS=/secrets/llm-service-account.json
+  ports: {}  user: app  workdir: /app
+  ```
+  (The capture kept the README's defaults; yours show your project and bucket.) Inside, `/.venv` holds 133 packages, 587 MB, including chromadb, langchain, openai-agents and onnxruntime, which this code never imports (`dataset-creator/02`, §6.9).
 - **If it fails:**
-  - `docker-shell.sh: 8: source: not found`: you're on dash. Run `bash docker-shell.sh` (§6.1).
-  - `../env.dev: No such file or directory`: you ran it from the wrong folder (`README.md:68`).
-  - `Conflict. The container name "/llm-dataset-creator" is already in use`: another shell has it open. Exit it, or `docker rm -f llm-dataset-creator`.
-  - The first build takes several minutes. The lock pulls `chromadb`, `onnxruntime`, `langchain` and `openai-agents`, which this code never imports (§6.9).
+  - `docker-shell.sh: 8: source: not found` (exit 127): you're on dash. Run `bash docker-shell.sh` (§6.1).
+  - `can't open '../env.dev'` / `../env.dev: No such file or directory`: you ran it from the wrong folder (`README.md:68`, §6.2).
+  - `Conflict. The container name "/llm-dataset-creator" is already in use`: another shell has it open (§6.11).
 
 **Step 5. Smoke test** (`README.md:90-94`): `python cli.py --help`
-- **Expected** (argparse in Python 3.12, rendered from an identical parser):
+- **Captured** (`dataset-creator/04`):
   ```
   usage: cli.py [-h] [--generate] [--prepare] [--upload]
 
@@ -574,8 +656,8 @@ Commands in code spans are verbatim from the README, code or notebook unless mar
     --prepare   Prepare data
     --upload    Upload data to bucket
   ```
-- **Under the hood:** importing `cli.py` already reads `GCP_PROJECT` and `GCS_BUCKET_NAME` (`cli.py:17`, `:21`) and builds the genai client (`:25`). The client loads credentials **lazily**, so `--help` succeeds even if the key is missing. It only proves the env vars exist.
-- **If it fails:** `KeyError: 'GCP_PROJECT'` means the `-e` flags didn't pass, i.e. `env.dev` wasn't sourced.
+- **Under the hood:** importing `cli.py` already reads `GCP_PROJECT` and `GCS_BUCKET_NAME` (`cli.py:17`, `:21`) and builds the genai client (`:25`). The client loads credentials **lazily**, so `--help` succeeds even without a key, as captured. It only proves the env vars exist.
+- **If it fails:** `KeyError: 'GCP_PROJECT'` means the `-e` flags didn't pass, i.e. `env.dev` wasn't sourced, or you ran `cli.py` outside the container.
 
 **Step 6. Generate** (`README.md:100-104`): `python cli.py --generate`
 - **Under the hood** (`cli.py:163-201`):
@@ -584,20 +666,37 @@ Commands in code spans are verbatim from the README, code or notebook unless mar
   - safety filters set to `OFF` (`:28-33`)
   - each response's text saved raw to `data/cheese_qa_{i}.txt` (`:196-199`)
   - the request goes to `…/locations/global/publishers/google/models/gemini-3.1-flash-lite:generateContent` (the model name is expanded by `google/genai/_transformers.py:181-182`)
-- **Checkpoint:**
+- **Captured without a key** (`dataset-creator/05`, exit status **0**):
   ```
   CLI Arguments: Namespace(generate=True, prepare=False, upload=False)
   generate()
   Generating batch: 0
-  ...
+  Error occurred while generating content: File /secrets/llm-service-account.json was not found.
+  Generating batch: 1
+  Error occurred while generating content: File /secrets/llm-service-account.json was not found.
+  …
   Generating batch: 4
+  Error occurred while generating content: File /secrets/llm-service-account.json was not found.
   ```
-  On the host, `ls dataset-creator/data` shows `cheese_qa_0.txt` … `cheese_qa_4.txt`, each a JSON array of ~20 objects.
-- **If it fails:**
-  - Errors are **caught and printed per batch** (`:200-201`), so the command "succeeds" anyway. Read the lines, e.g. `Error occurred while generating content: File /secrets/llm-service-account.json was not found.` (google-auth's message, `google/auth/_default.py:174` in the locked google-auth 2.41.1), or 403/`PERMISSION_DENIED`, which means a missing role or the API isn't enabled.
-  - `PermissionError … 'data'` on a Linux host: the container user (uid 1000) can't write to your bind-mounted folder (§6.6).
+  The errors are **caught and printed per batch** (`:200-201`), so the command "succeeds". `data/` now exists, empty (`dataset-creator/06`).
+- **With a key** the same lines print without the `Error occurred …` lines (no run documents it; read from the code's `print` calls), and `data/` holds `cheese_qa_0.txt` … `cheese_qa_4.txt`, each a JSON array of ~20 `{"question", "answer"}` objects. The README's sample (**expected**, `README.md:163-175`, cut there with `...`):
+  ```
+  [
+    {
+      "question": "What is the significance of the 'pasta filata' technique in cheesemaking?",
+      "answer": "Welcome welcome welcome, cheese lovers! This is your lecturer ‹instructor›, your guide to the glorious world of cheese. 'Pasta filata,' you ask? … "
+    },
+    {
+      "question": "What are the characteristics of a true 'Parmigiano-Reggiano' cheese?",
+      "answer": "Yello - this is ‹instructor› your cheese monker, here to guide you through the world of cheese. … ..."
+    },
+    ...
+  ]
+  ```
+- **If it fails:** a 403/`PERMISSION_DENIED` line means a missing role or the API isn't enabled; `PermissionError … 'data'` on a Linux host means the container user can't write to your bind-mounted folder (§6.6).
 - **README vs code:**
-  - The README's "System Prompt" excerpt (`README.md:114-135`) shows the *old* openers ("Welcome welcome welcome, cheese lovers! …", "Let us do system3"). The code now lists "Good question", "Glad you ask", "I have slides for that" and "I knew you will ask this, I have slides coming", plus new phrases "Look at this horse" and "Best thing after sliced bread" (`cli.py:83-101`, changed in `6e4c3f7`). The prompt's own sample JSON was not updated: its example answers still open with "Welcome welcome welcome, cheese lovers!…", "Yello - this is Pavlos your cheese monker…" and "Welcome welcome to AC215…" (`cli.py:133`, `:137`, `:140`).
+  - The README's "System Prompt" excerpt (`README.md:114-135`) shows the *old* openers ("Welcome welcome welcome, cheese lovers! …", "Let us do system3"). The code now lists "Good question", "Glad you ask", "I have slides for that" and "I knew you will ask this, I have slides coming", plus new phrases "Look at this horse" and "Best thing after sliced bread" (`cli.py:83-101`, changed in `6e4c3f7`). The prompt's own sample JSON was not updated: its example answers still open with "Welcome welcome welcome, cheese lovers!…", "Yello - this is ‹instructor› your cheese monker…" and "Welcome welcome to AC215…" (`cli.py:133`, `:137`, `:140`).
+  - The README's "Input Prompt" (`README.md:143-145`) is word for word the code's `INPUT_PROMPT` (`cli.py:169`); its "Number of Iterations" block (`README.md:149-155`) matches `NUM_ITERATIONS = 5` (`cli.py:170`).
   - The README says "Change any of the default parameters" (`README.md:106`), but there are no CLI parameters: you edit `NUM_ITERATIONS` (`cli.py:170`) in the file.
 
 **Step 7. Prepare** (`README.md:181-187`): `python cli.py --prepare`
@@ -606,46 +705,145 @@ Commands in code spans are verbatim from the README, code or notebook unless mar
   2. Strip any `` ```json `` fences (`:219`), then `json.loads` each file; failures go into `errors` (`:221-226`).
   3. Build a DataFrame, drop duplicate questions and NaNs, and save `instruct-dataset.csv` (`:232-238`).
   4. Add a `text` column (`human:/bot:`) and a `contents` column (Gemini turns) (`:241-257`).
-  5. `train_test_split(test_size=0.1, random_state=42)` (`:260-262`), then write `train.csv`/`test.csv` (text only) and `train.jsonl`/`test.jsonl` (contents only). The test set is capped at 256 rows, Gemini's validation limit (`:266-273`).
-- **Checkpoint:** "Processing file: data/cheese_qa_0.txt" … then `Number of errors: 0`, `[]`, `Shape: (N, 2)` with N ≈ 100 (fewer after deduplication), and the DataFrame head. With 100 rows the split is 90/10.
-  - *(extra)* `head -c 300 data/train.jsonl` shows `{"contents":[{"role":"user","parts":[{"text":"...`. pandas may write `/` as `\/`, which is valid JSON.
-  - *(extra)* `wc -l data/*.jsonl`.
+  5. `train_test_split(test_size=0.1, random_state=42)` (`:260-262`), then write `train.csv`/`test.csv` (text only, `:263-264`), cap the test frame at 256 rows, Gemini's validation limit (`:266-267`; it only affects `test.jsonl`, since `test.csv` was already written), and write `train.jsonl`/`test.jsonl` (contents only, `:270-273`).
+- **Captured right after the failed generate** (`dataset-creator/07`, exit 1): the failure from Step 6 surfaces here.
+  ```
+  CLI Arguments: Namespace(generate=False, prepare=True, upload=False)
+  prepare()
+  Number of errors: 0
+  []
+  Shape: (0, 0)
+  Empty DataFrame
+  Columns: []
+  Index: []
+  Traceback (most recent call last):
+  …
+    File "/app/cli.py", line 243, in prepare
+      + output_pairs_df["question"]
+  …
+  KeyError: 'question'
+  ```
+  Before crashing it has written a 1-byte `instruct-dataset.csv` (`laptop/13`).
+- **Captured on scripted data** (`dataset-creator/09`): five hand-written files of four pairs each (20 pairs in the shape `--generate` writes; the last repeats the first question on purpose) were copied into `data/` from the laptop. The program and its output are real; the data is **scripted**, not Gemini's.
+  ```
+  CLI Arguments: Namespace(generate=False, prepare=True, upload=False)
+  prepare()
+  Processing file: data/cheese_qa_0.txt
+  …
+  Processing file: data/cheese_qa_4.txt
+  Number of errors: 0
+  []
+  Shape: (19, 2)
+                                              question                                             answer
+  0               What does rennet do in cheesemaking?  Good question! Rennet carries the enzyme chymo...
+  1                    Why do some cheeses have holes?  Glad you ask! In Swiss-type cheeses like Emmen...
+  …
+  4           Why is Parmigiano-Reggiano aged so long?  I knew you will ask this, I have slides coming...
+  ```
+  20 pairs minus one duplicate question = 19 rows. With ~100 generated rows the split is 90/10.
+- **Checkpoint** *(extras, captured `dataset-creator/10`, `11`, `12`)*:
+  ```
+  $ ls -la data; wc -l data/*.jsonl data/*.csv
+  …
+  -rw-rw-rw- 1 app app 5988 Oct 31 02:36 instruct-dataset.csv
+  -rw-rw-rw- 1 app app  627 Oct 31 02:36 test.csv
+  -rw-rw-rw- 1 app app  774 Oct 31 02:36 test.jsonl
+  -rw-rw-rw- 1 app app 5581 Oct 31 02:36 train.csv
+  -rw-rw-rw- 1 app app 6868 Oct 31 02:36 train.jsonl
+      2 data/test.jsonl
+     17 data/train.jsonl
+     20 data/instruct-dataset.csv
+  …
+  $ head -c 400 data/train.jsonl; echo
+  {"contents":[{"role":"user","parts":[{"text":"What makes Comte different from Gruyere?"}]},{"role":"model","parts":[{"text":"Glad you ask! Both are mountain cheeses …
+  ```
+  19 rows → `train_test_split(test_size=0.1)` gives 2 test and 17 train examples, one JSONL line each. `head -1 data/train.jsonl | python -m json.tool` shows the same `contents` / `role` / `parts` / `text` nesting as the README's "For Gemini fine-tuning the required data format" block (`README.md:189-212`). `train.csv` holds a `text` column (`"human: … \nbot: …"`), `instruct-dataset.csv` the columns `question,answer` (`dataset-creator/13`). On the laptop, the files sit in `dataset-creator/data/`, which git ignores (`git status --ignored` → `!! dataset-creator/data/`, `laptop/15`).
 - **If it fails:**
-  - `KeyError: 'question'` right after `Shape: (0, 0)` means every generation batch failed in Step 6, so the DataFrame has no columns (reproduced with pandas). Go back and read Step 6's error lines.
-  - `Number of errors: 1` with "Unterminated string…" means a batch was cut off at the 8,192-token limit. The others still work.
+  - `KeyError: 'question'` right after `Shape: (0, 0)`: every generation batch failed in Step 6. Go back and read Step 6's error lines, and fix the key.
+  - `Number of errors: 1` with "Unterminated string…" means a batch was cut off at the 8,192-token limit. The others still work (Exercise B1).
 
 **Step 8. Upload** (`README.md:218-222`): `python cli.py --upload`
 - **Under the hood:** `storage.Client()` uses the SA key (`cli.py:279`). The project comes from the key file, not from `GCP_PROJECT`. The code uploads `*.jsonl` + `*.csv`, sorted (`:283-286`), to `llm-finetune-dataset-small/<file>` (`:291`) with a 300 s timeout (`:281`, `:294`).
-- **Checkpoint:**
+- **Captured without a key** (`dataset-creator/14`, exit 1). Unlike `--generate`, nothing catches the error:
   ```
+  CLI Arguments: Namespace(generate=False, prepare=False, upload=True)
   upload()
-  Uploading file: data/instruct-dataset.csv llm-finetune-dataset-small/instruct-dataset.csv
-  Uploading file: data/test.csv llm-finetune-dataset-small/test.csv
-  Uploading file: data/test.jsonl llm-finetune-dataset-small/test.jsonl
-  Uploading file: data/train.csv llm-finetune-dataset-small/train.csv
-  Uploading file: data/train.jsonl llm-finetune-dataset-small/train.jsonl
+  Traceback (most recent call last):
+  …
+    File "/app/cli.py", line 279, in upload
+      storage_client = storage.Client()
+  …
+    File "/.venv/lib/python3.12/site-packages/google/auth/_default.py", line 173, in load_credentials_from_file
+      raise exceptions.DefaultCredentialsError(
+  google.auth.exceptions.DefaultCredentialsError: File /secrets/llm-service-account.json was not found.
   ```
-  *(extra)* `gcloud storage ls gs://<bucket>/llm-finetune-dataset-small/`.
+- **With a key:** no run documents the output. By the code (`cli.py:277`, `:293`) it prints `upload()` and then one `Uploading file: data/<file> llm-finetune-dataset-small/<file>` line per file, five in all, in sorted order: `instruct-dataset.csv`, `test.csv`, `test.jsonl`, `train.csv`, `train.jsonl`. *(extra)* `gcloud storage ls gs://<bucket>/llm-finetune-dataset-small/` lists them.
 - **If it fails:**
   - `404 … The specified bucket does not exist.`: create it (Step 2), or fix `env.dev:7`.
   - `403 … does not have storage.objects.create access`: the bucket belongs to someone else (e.g. the default `cheese-dataset`), or the SA lacks Storage Admin.
-- **Tip:** flags combine. `python cli.py --generate --prepare --upload` runs all three in order (`cli.py:300-307`).
+- **Tip:** flags combine. `python cli.py --generate --prepare --upload` runs all three, always in that order (`cli.py:300-307`).
 
 ### Part B: Fine-tune Gemini (`README.md:228-316`)
 
 **Step 9. Enter the second container** (`README.md:236-247`): `exit`, then `cd ../gemini-finetuner` *(both extra; the README says "Make sure you are inside the `gemini-finetuner` folder")*, `sh docker-shell.sh`, `python cli.py --help`.
-- **Under the hood:** this is the same Dockerfile and the same `uv.lock`, byte-identical to dataset-creator's (`diff` shows no difference). Docker's layer cache reuses every layer up to and including `uv sync` (same base, same commands, same `pyproject.toml`/`uv.lock` content); only the final `COPY . ./` differs, so this build is fast. The image is `gemini-finetuner` (`docker-shell.sh:9`). The two `docker-shell.sh` files differ only in `IMAGE_NAME` and one blank line, which is why `source` is on line 7 here and line 8 in dataset-creator.
-- **Checkpoint:** `usage: cli.py [-h] [--train] [--chat]` with `--train  Train model` and `--chat  Chat with model`.
+- **Under the hood:** this is the same Dockerfile and the same `uv.lock`, byte-identical to dataset-creator's. Docker's layer cache reuses every layer up to and including `uv sync`; only the final `COPY . ./` runs. The image is `gemini-finetuner` (`docker-shell.sh:9`). The two `docker-shell.sh` files differ only in `IMAGE_NAME` and one blank line, which is why `source` is on line 7 here and line 8 in dataset-creator.
+- **Captured** (`laptop/16`, `18`, `19`, `gemini-finetuner/01`):
+  ```
+  $ diff dataset-creator/uv.lock gemini-finetuner/uv.lock && echo "uv.lock: identical"; …
+  uv.lock: identical
+  pyproject.toml: identical
+  Dockerfile: identical
+  6d5
+  < 
+  10c9
+  < export IMAGE_NAME="llm-dataset-creator"
+  ---
+  > export IMAGE_NAME="gemini-finetuner"
+  $ sh docker-shell.sh
+
+  [+] Building 0.0s (11/11) FINISHED                               docker:default
+  …
+   => CACHED [5/6] RUN uv sync --frozen                                      0.0s
+   => [6/6] COPY --chown=app:app . ./                                        0.0s
+  …
+  Python version: Python 3.12.16
+  UV version: uv 0.13.6 (x86_64-unknown-linux-gnu)
+  Activating virtual environment...
+  app@2a2550dec953:/app$
+  $ python cli.py --help
+  usage: cli.py [-h] [--train] [--chat]
+
+  CLI
+
+  options:
+    -h, --help  show this help message and exit
+    --train     Train model
+    --chat      Chat with model
+  ```
+  `docker images` now lists `gemini-finetuner:latest` and `llm-dataset-creator:latest`, 1.64GB each; they share every layer but the last (`laptop/19`). After `exit` from the first container, `docker ps -a` was empty: `--rm` deleted it (`laptop/14`).
 - **If it fails:** the same as Step 4 (`gemini-finetuner/docker-shell.sh:7` is the `source` line).
 
 **Step 10. Start tuning** (`README.md:253-257`): `python cli.py --train`
 - **Under the hood** (`cli.py:44-99`):
   1. Build `TuningDataset(gcs_uri=TRAIN_DATASET)` and `TuningDataset(gcs_uri=VALIDATION_DATASET)` (`:48-49`).
-  2. Create the config: 1 epoch, LR multiplier 1.0, adapter size four, display name `pavlos-cheese-demo-v3.1` (`:52-58`).
-     - The validation field is typed `TuningValidationDataset` (`types.py:10541`). Passing a `TuningDataset` still works because google-genai's pydantic base model has `from_attributes=True` (`_common.py:434-445`); the coercion was confirmed with a toy pydantic 2 model.
+  2. Create the config: 1 epoch, LR multiplier 1.0, adapter size four, a display name (`:52-58`).
+     - The validation field is typed `TuningValidationDataset` (`types.py:10541`). Passing a `TuningDataset` still works because google-genai's pydantic base model has `from_attributes=True` (`_common.py:434-445`).
   3. `train_client.tunings.tune(...)` (`:61-65`), print the job name, sleep 60 s, re-fetch (`:71-72`).
   4. `wait_for_job` is False (`:126`), so the code skips the polling loop and prints.
-- **Checkpoint (expected shape):**
+- **Captured without a key** (`gemini-finetuner/02`, exit 1). google-genai 1.39.1 first warns that tuning is experimental (harmless), then fails while building the request's `Authorization` header; nothing was sent and no job exists:
+  ```
+  CLI Arguments: Namespace(train=True, chat=False)
+  train()
+  /app/cli.py:61: ExperimentalWarning: The SDK's tuning implementation is experimental, and may change in future versions.
+    tuning_job = train_client.tunings.tune(
+  Traceback (most recent call last):
+  …
+    File "/.venv/lib/python3.12/site-packages/google/genai/_api_client.py", line 1070, in _request_once
+      http_request.headers['Authorization'] = f'Bearer {self._access_token()}'
+  …
+  google.auth.exceptions.DefaultCredentialsError: File /secrets/llm-service-account.json was not found.
+  ```
+- **With a key:** no run documents the output. By the code (`cli.py:45`, `:67-68`, `:89`, `:97`) it prints, after the same `ExperimentalWarning`:
   ```
   CLI Arguments: Namespace(train=True, chat=False)
   train()
@@ -654,94 +852,174 @@ Commands in code spans are verbatim from the README, code or notebook unless mar
   Job name: projects/<project-number>/locations/us-central1/tuningJobs/<id>
 
   Tuned model info: None
-  Experiment: ...
+  Experiment: …
   ```
-  `Tuned model info` is `None` because the job is still running. Then watch the job in the console: Agent Platform → Tuning (`README.md:261`). Its detail page shows "Tuning progress", "Training metrics" and "Validation metrics" (Fraction of correct next step preds, Num predictions, Total loss) and a "Data distribution" tab (`images/training-1.png`, `images/training-2.png`). In the README's screenshot the mean output length is 267 tokens per example.
+  (a shape read from the code, not an output). `Tuned model info` is `None` because a minute in, the job is still running. Then watch the job in the console: Agent Platform → Tuning (`README.md:261`). Its detail page shows the training and validation metrics and a "Data distribution" tab (the README's screenshots, `README.md:310-316`).
 - **If it fails:**
   - `403`/`PERMISSION_DENIED` reading `gs://cheese-dataset/...`: you skipped Step 3. (The read is done by your project's tuning service agent, not your key, so granting your SA more roles won't fix it; §3.4.) If there's *no* error, still check the job's dataset URI in the console: a publicly readable course bucket (not verified) would mean you trained on the instructor's data.
   - `PERMISSION_DENIED` on `tuningJobs.create`: the SA lacks `roles/aiplatform.user`.
   - A 400 naming the base model: `gemini-3.1-flash-lite` isn't tunable in your region/project (§9). Check the console's list of tunable models.
-  - Want the CLI to wait? Change `:126` to `train(wait_for_job=True)`. It then prints `Job in progress... State: JobState.JOB_STATE_RUNNING` every minute until a terminal state.
+  - Want the CLI to wait? Change `:126` to `train(wait_for_job=True)`. It then prints `Job in progress... State: JobState.JOB_STATE_RUNNING` every minute until a terminal state (Exercise B8).
+
+**Step 10b. Read the cost section** (`README.md:265-278`). Nothing to run. The README's table (**expected**):
+```
+Gemini 1.5 Flash Tuning is 0.008 USD per 1,000 tokens. …
+| Tokens    | Epochs | Total Tokens | Price per 1000 | Cost    | # Documents |
+|-----------|--------|--------------|----------------|---------|-------------|
+| 4,697,472 | 3      | 14,092,416   | $0.008         | $112.73 | 16,444 ***  |
+| 23,874    | 3      | 71,622       | $0.008         | $0.573  | 88          |
+
+*** Way too much data for this fine tuning!
+```
+The code now tunes `gemini-3.1-flash-lite` for 1 epoch, so treat the numbers as stale and use the linked pricing page (§2, §9 erratum 6).
 
 **Step 11. Get your endpoint** *(extra; the README skips this)*.
-- **Action:** when the job shows **Succeeded**, copy the tuned model's endpoint (`projects/<num>/locations/us/endpoints/<id>`) from the console and paste it into `MODEL_ENDPOINT` at `gemini-finetuner/cli.py:107`.
-- Lines `:93-96` print exactly this instruction, but only when `tuned_model` is already set, which the default flow doesn't reach.
+- **Action:** when the job shows **Succeeded**, copy the tuned model's endpoint (`projects/<num>/locations/us/endpoints/<id>`) from the console and paste it into `MODEL_ENDPOINT` at `gemini-finetuner/cli.py:107`, which still holds the instructor's endpoint `projects/‹instructor-project-number›/locations/us/endpoints/‹endpoint-id›`.
+- Lines `:90-96` print exactly this instruction, but only when `tuned_model` is already set, which the default flow practically never reaches.
 
 **Step 12. Chat** (`README.md:284-286`): `python cli.py --chat`
 - **Under the hood:** it calls `chat_client.models.generate_content(model=MODEL_ENDPOINT, contents=query, config=generation_config)` (`:113-117`).
   - The model path starts with `projects/`, so it's used as-is (`_transformers.py:173-177`). The URL is `https://aiplatform.us.rep.googleapis.com/v1beta1/<MODEL_ENDPOINT>:generateContent`.
-  - The query is `"How is cheese made in Greece? Answer pavlos style?"` (`:109`).
+  - The query is `"How is cheese made in Greece? Answer ‹instructor› style?"` (`:109`).
   - Generation uses `max_output_tokens=3000`, `temperature=0.75` and `top_p=0.95` (`:37-41`).
-- **Checkpoint:**
+- **Captured without a key** (`gemini-finetuner/03`, exit 1; the endpoint never appears in the output):
   ```
   CLI Arguments: Namespace(train=False, chat=True)
   chat()
-  query:  How is cheese made in Greece? Answer pavlos style?
+  query:  How is cheese made in Greece? Answer ‹instructor› style?
   Using serving location: us
-  Fine-tuned LLM Response: <a Pavlos-style answer>
+  Traceback (most recent call last):
+  …
+    File "/app/cli.py", line 113, in chat
+      response = chat_client.models.generate_content(
+  …
+  google.auth.exceptions.DefaultCredentialsError: File /secrets/llm-service-account.json was not found.
   ```
-  The README's example (`README.md:295-301`) uses an older query, "How is cheese made?", and an answer opening "Yello - this is Pavlos your cheese monker…".
-- **If it fails:** `403 PERMISSION_DENIED` or `404 NOT_FOUND` on `projects/129349313346/...` means you're still calling the instructor's endpoint. Do Step 11.
+- **With a key and your endpoint:** the same first four lines, then `Fine-tuned LLM Response: <an answer in the persona's voice>`. The README's example (**expected**, `README.md:295-301`) uses an older query:
+  ```
+  How is cheese made?
 
-**Step 13. Try the hosted demo and look at the metrics** (`README.md:303-316`). The README links "[Pavlos Cheese Model](https://ac215-llm-rag.dlops.io/finetunechat)". It notes "it is assumed you have your vector database that is running locally", which refers to the RAG app of L05/L10, not this repo. A note recommends Chrome for that page (`README.md:305-306`). The README ends with the two console screenshots, "Training Monitor" and "Data distribution" (`README.md:310-316`).
+  Fine-tuned LLM Response: 
+
+  Yello - this is ‹instructor› your cheese monker, ready to take you on a journey into the heart of cheesemaking! … It begins with fresh milk, which is heated and then inoculated with rennet, an enzyme that causes the milk to coagulate and form curds...
+  ```
+- **If it fails:** `403 PERMISSION_DENIED` or `404 NOT_FOUND` on `projects/‹instructor-project-number›/...` means you're still calling the instructor's endpoint. Do Step 11.
+
+**Step 13. Try the hosted demo and look at the metrics** (`README.md:303-316`). The README links a hosted "cheese model" page at `https://ac215-llm-rag.dlops.io/finetunechat` (not visited for this guide; it may not be live). It notes "it is assumed you have your vector database that is running locally", which refers to the RAG app of L05/L10, not this repo. A note recommends Chrome for that page (`README.md:305-306`). The README ends with the two console screenshots, "Training Monitor" and "Data distribution" (`README.md:310-316`).
+
+**Step 13b. Tear down Track A** *(extra)*. `exit` the container, then on the laptop (captured `laptop/22`):
+```
+$ docker image rm llm-dataset-creator gemini-finetuner
+Untagged: llm-dataset-creator:latest
+Deleted: sha256:aa7c4de9d4cb…
+Untagged: gemini-finetuner:latest
+Deleted: sha256:9ea1b51f3d50…
+```
+Then the cloud side: the bucket folder, the tuned model and endpoint (after L10), unused keys (§2).
 
 ### Part C: QLoRA in Colab (notebook)
 
+Every output in this part is **recorded**: the notebook's stored outputs from the course staff's A100 run (no GPU was available for the captures). Your numbers on a T4 will differ slightly; the counts (parameters, steps) will not.
+
 **Step 14. Copy and pick a GPU** (nb cells 1-2). File → Save a copy in Drive; Runtime → Change runtime type → GPU (T4 is fine).
 
-**Step 15. Install** (nb cell 8): `!uv pip install transformers==5.16.1 tokenizers==0.23.1 huggingface-hub==1.29.0 bitsandbytes==0.50.2`, `!uv pip install trl==1.14.0`, `!uv pip uninstall torchao`.
-- **Stored output:** `Using Python 3.13.15 environment at: /usr`, `+ bitsandbytes==0.50.2`, `+ trl==1.14.0`, `- torchao==0.10.0`. Only these changed; Colab already had the other pinned versions.
+**Step 15. Install** (nb cell 8, notebook section 3): `!uv pip install transformers==5.16.1 tokenizers==0.23.1 huggingface-hub==1.29.0 bitsandbytes==0.50.2`, `!uv pip install trl==1.14.0`, `!uv pip uninstall torchao`.
+- **Recorded:**
+  ```
+  Using Python 3.13.15 environment at: /usr
+  …
+   + bitsandbytes==0.50.2
+  …
+   + trl==1.14.0
+  Using Python 3.13.15 environment at: /usr
+  Uninstalled 1 package in 124ms
+   - torchao==0.10.0
+  ```
+  Only these changed; Colab already had the other pinned versions.
 - **Why uninstall torchao:** peft 0.20.0 raises `ImportError` "Found an incompatible version of torchao. Found version 0.10.0, but only versions above 0.16.0 are supported" when it probes torchao (`peft/import_utils.py:131-151`). As the cell's comment says ("peft refuses to add LoRA layers to a full-precision model while it is installed", nb cell 8:6), the probe only happens for non-quantized layers. PEFT tries its LoRA dispatchers in order and the first match wins: bitsandbytes 4-bit before torchao (`peft/tuners/lora/model.py:403-432`). So the 4-bit training in nb cell 72 never reaches the probe; the error would surface in nb cell 86, where `PeftModel.from_pretrained` adds the adapter to the FP16 model (`peft/tuners/lora/torchao.py:160`). *(Read from the source; not reproduced.)*
 
-**Step 16. HF token** (nb cells 9-10): add the secret `HF_TOKEN` and turn on Notebook access, then run `userdata.get('HF_TOKEN')` and `login(token=hf_token)`. Expected output: `Hugging Face token successfully loaded.`
+**Step 16. HF token** (nb cells 9-10): add the secret `HF_TOKEN` and turn on Notebook access, then run `userdata.get('HF_TOKEN')` and `login(token=hf_token)`. Recorded output: `Hugging Face token successfully loaded.`
 
-**Step 17. Imports** (nb cell 12). Expected output: `torch 2.11.0+cu128 | transformers 5.16.1 | peft 0.20.0 | trl 1.14.0 | bitsandbytes 0.50.2`. If a later cell fails, compare these versions first (nb cell 7).
+**Step 17. Imports** (nb cell 12). Recorded output: `torch 2.11.0+cu128 | transformers 5.16.1 | peft 0.20.0 | trl 1.14.0 | bitsandbytes 0.50.2`. If a later cell fails, compare these versions first (nb cell 7).
 
 **Step 18. Mount Drive and pre-download** (nb cells 14, 16).
 - **Commands:** `drive.mount('/content/drive')`, then
   - `!hf download --repo-type model --quiet --cache-dir {cache_dir} facebook/opt-350m --exclude "*.h5" --exclude "*.msgpack"`
   - `!hf download --repo-type model --quiet --cache-dir {cache_dir} Qwen/Qwen3-0.6B`
-- **Stored output:** the snapshot paths `/content/drive/MyDrive/LLM_cache/models--facebook--opt-350m/snapshots/08ab08cc4b72ff5593870b5d527cf4230323703c` and `/content/drive/MyDrive/LLM_cache/models--Qwen--Qwen3-0.6B/snapshots/c1899de289a04d12100db370d81485cdf75e47ca`.
+- **Recorded:** `Mounted at /content/drive`, then the snapshot paths `/content/drive/MyDrive/LLM_cache/models--facebook--opt-350m/snapshots/08ab08cc4b72ff5593870b5d527cf4230323703c` and `/content/drive/MyDrive/LLM_cache/models--Qwen--Qwen3-0.6B/snapshots/c1899de289a04d12100db370d81485cdf75e47ca` (plus two `Hint:` lines from the `hf` CLI, which you can ignore).
 
 **Step 19. Part B of the notebook: quantize OPT-350m** (nb cells 17-28).
 - Load OPT-350m with the bnb config (nb cell 18). Poll 1 (nb cell 20) asks for the main advantage of 4-bit loading; the answer is memory. Then `print(model)`. You should see `Linear4bit` layers; `lm_head` stays `Linear` (nb cell 21 output).
 - Tokenize "Hello my cheese name is" → `input_ids tensor([[    2, 31414,   127,  7134,   766,    16]], device='cuda:0')` (nb cell 25 output).
-- Generate 20 tokens. Stored output: "Hello my cheese name is cheese.\nI'm not sure if you're joking or not.\nI'm not sure if" (nb cell 27).
+- Generate 20 tokens. Recorded output: "Hello my cheese name is cheese.\nI'm not sure if you're joking or not.\nI'm not sure if" (nb cell 27).
 - Read the "Deeper Dive" notes on compute dtype, FP4 vs NF4 and double quantization (nb cell 28; markdown only, nothing to run).
 
-**Step 20. Load Qwen3-0.6B in 4-bit** (nb cells 31-36). The GPU check prints "Your GPU supports bfloat16. This notebook still trains in float16, so the same settings also work on T4 GPUs." (stored, A100). The bnb config is in nb cell 34; tokenizer, model and `prepare_model_for_kbit_training` are in nb cell 36.
+**Step 20. Load Qwen3-0.6B in 4-bit** (nb cells 31-36). The GPU check prints "Your GPU supports bfloat16. This notebook still trains in float16, so the same settings also work on T4 GPUs." (recorded, A100; the T4 branch was not recorded). The bnb config is in nb cell 34; tokenizer, model and `prepare_model_for_kbit_training` are in nb cell 36.
 
 **Step 21. Inspect** (nb cells 38-48).
 - Parameter count: "Number of parameters: 375.84896 millions." (§3.5 explains it).
 - `use_cache = False` (nb cell 40).
-- The config prints `"quant_method": "bitsandbytes"`, `"bnb_4bit_quant_type": "nf4"` and `"tie_word_embeddings": true` (nb cell 42).
-- Baseline generation (nb cell 45). The stored output ("what is your name ? I'm trying to get the correct answers…") doesn't start with the prompt, although `decode(outputs[0])` would include it (§9). Expect your output to begin with "Hello my cheese name is".
+- The config prints `"quant_method": "bitsandbytes"`, `"bnb_4bit_quant_type": "nf4"`, `"bnb_4bit_use_double_quant": true` and `"tie_word_embeddings": true` (nb cell 42).
+- Baseline generation (nb cell 45). The recorded output ("what is your name ? I'm trying to get the correct answers…") doesn't start with the prompt, although `decode(outputs[0])` would include it (§9). Expect your output to begin with "Hello my cheese name is".
 - Trainable count: "trainable params: 0 || all params: 375848960 || trainable%: 0.0" (nb cell 48).
 
 **Step 22. Data** (nb cells 51-63).
-- `!gdown 1b5hFsjpCqI3ZXvraIF0w7eW-mRO7Ecao` downloads `train_16k.jsonl` (23.2 MB).
+- `!gdown 1b5hFsjpCqI3ZXvraIF0w7eW-mRO7Ecao` downloads `train_16k.jsonl` (recorded: `To: /content/train_16k.jsonl`, `100% 23.2M/23.2M`).
 - Sample 1000 rows with `random_state=42` → `(1000, 1)`. The single column, `contents`, is exactly Track A's Gemini format.
 - `extract_qa` turns rows back into question/answer (nb cell 55), then into a HF `Dataset` (nb cell 57).
 - The chat template is applied (nb cell 59).
 - `train_test_split(test_size=0.10, shuffle=True, seed = 42)` → `(900, 3)` / `(100, 3)` (nb cell 61).
-- Verify one example (nb cell 63, quoted in §3.3) and plot the token-length histogram (nb cell 64).
+- Verify one example (nb cell 63, recorded; persona name masked):
+  ```
+  <|im_start|>user\nCan you explain the process of 'affioratura' in mozzarella production, and why it's crucial?<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nWelcome welcome, cheese lovers! This is your lecturer ‹instructor› here, ready to take you on a journey into the heart of mozzarella-making. …
+  ```
+  and plot the token-length histogram (nb cell 64).
 
 **Step 23. Configure and train** (nb cells 65-75).
 - Polls along the way: Poll 2 (nb cell 66, LoRA trains only small adapter matrices), Poll 3 (nb cell 68, raising `r` to 64 adds trainable parameters and slows training), Poll 4 (nb cell 74, the model adopts the training style even on unrelated questions while keeping most general knowledge).
-- `LoraConfig` (nb cell 67), `SFTConfig` (nb cell 70), `SFTTrainer` + fp32 cast (nb cell 72), whose output is "trainable params: 1146880 || all params: 376995840 || trainable%: 0.3042155584528466".
-- Then `trainer.train()`. The stored progress was `[450/450 03:36, Epoch 2/2]`, with training loss 2.007381 (step 50) → 1.629233 (100) → 1.509897 (150) → 1.467495 (200) → 1.407929 (250) → 1.354591 (300) → 1.376134 (350) → 1.364813 (400) → 1.350437 (450). It ended with `TrainOutput(global_step=450, training_loss=1.4964344957139757, …)`.
-- A one-time warning `[transformers] The tokenizer has new PAD/BOS/EOS tokens that differ from the model config and generation config. … Updated tokens: {'bos_token_id': None}.` is harmless.
+- `LoraConfig` (nb cell 67), `SFTConfig` (nb cell 70), `SFTTrainer` + fp32 cast (nb cell 72). Recorded:
+  ```
+  [progress widget] Adding EOS to train dataset:   0%|          | 0/900 …
+  [progress widget] Tokenizing train dataset:   0%|          | 0/900 …
+  …
+  trainable params: 1146880 || all params: 376995840 || trainable%: 0.3042155584528466
+  ```
+- Then `trainer.train()` (nb cell 75). Recorded:
+  ```
+  [transformers] The tokenizer has new PAD/BOS/EOS tokens that differ from the model config and generation config. … Updated tokens: {'bos_token_id': None}.
+  [450/450 03:36, Epoch 2/2]
+  Step	Training Loss
+  50	2.007381
+  100	1.629233
+  150	1.509897
+  …
+  400	1.364813
+  450	1.350437
+  TrainOutput(global_step=450, training_loss=1.4964344957139757, metrics={'train_runtime': 217.4211, …
+  ```
+  The PAD/BOS/EOS notice is harmless.
 
-**Step 24. TensorBoard** (nb cell 77): `%load_ext tensorboard`, `%tensorboard --logdir results/runs`. transformers writes to `output_dir/runs/<date>_<host>` by default (`transformers/integrations/integration_utils.py:574`, `:620-621`), so `results/runs` is right. The stored output is hidden.
+**Step 24. TensorBoard** (nb cell 77): `%load_ext tensorboard`, `%tensorboard --logdir results/runs`. transformers writes to `output_dir/runs/<date>_<host>` by default (`transformers/integrations/integration_utils.py:574`, `:620-621`), so `results/runs` is right. The stored output is hidden ("Output hidden; open in https://colab.research.google.com to view.").
 
 **Step 25. Evaluate** (nb cells 80, 82).
-- The loss/perplexity table is quoted in §3.8. Each evaluation pass takes about 9 s on an A100.
-- Side-by-side generations for 3 prompts with `max_new_tokens=100` and greedy decoding (nb cell 82:19-44). That's why the stored answers stop mid-sentence ("…A fresh cheese, like a Pecor").
+- Loss and perplexity on the 100 test examples, adapter on and off (recorded, emoji stripped):
+  ```
+  Evaluating on 100 samples...
+  100%|██████████| 100/100 [00:08<00:00, 11.86it/s]
+  …
+  Samples evaluated: 100
+  Total tokens: 30,681
+
+                                Loss  Perplexity
+  Base (4-bit)                2.6498       14.15
+  Fine-tuned (4-bit + LoRA)   1.3872        4.00
+  ```
+- Side-by-side generations for 3 prompts with `max_new_tokens=100` and greedy decoding (nb cell 82:19-44). That's why the recorded answers stop mid-sentence. Both cheese answers of the fine-tuned model open with "Welcome welcome welcome, cheese lovers! This is your lecturer ‹instructor› here…"; the sky answer with "Yello - this is ‹instructor› your cheese monker…" (§3.1 has the physics).
 
 **Step 26. Save** (nb cells 84, 86, 88).
-- **Adapters:** saved to `LLM_cache/Qwen0.6B-finetune_cheese`.
-- **Merged model:** reload FP16 → `PeftModel.from_pretrained` → `merge_and_unload()` → save to `…_merged`. The stored outputs list `tokenizer_config.json`, `chat_template.jinja` and `tokenizer.json` paths.
-- **Optional:** a private HF repo `<user>/Qwen0.6B-finetune_cheese_merged`. Stored output: "✓ Detected Hugging Face username: rashmi" and "Model successfully uploaded to https://huggingface.co/rashmi/Qwen0.6B-finetune_cheese_merged".
+- **Adapters** (6.1): saved to `LLM_cache/Qwen0.6B-finetune_cheese`; the recorded output lists `…/Qwen0.6B-finetune_cheese/tokenizer_config.json`, `chat_template.jinja` and `tokenizer.json`.
+- **Merged model** (6.2): reload FP16 → `PeftModel.from_pretrained` → `merge_and_unload()` → save to `…_merged`.
+- **Optional** (6.3): a private HF repo `<user>/Qwen0.6B-finetune_cheese_merged`. Recorded output: `✓ Detected Hugging Face username: ‹hf-user›` and `Model successfully uploaded to https://huggingface.co/‹hf-user›/Qwen0.6B-finetune_cheese_merged`.
 - **Wrap-up:** nb cell 89 renders a "QLoRA Fine-Tuning Steps" flow diagram by sending Mermaid code to `https://mermaid.ink` (needs internet); nb cell 90 lists further reading.
 
 ---
@@ -752,7 +1030,7 @@ Commands in code spans are verbatim from the README, code or notebook unless mar
 llm-finetuning/  (main @ 44ef6f0)
 ├── README.md                      # the tutorial (Track A); 316 lines
 ├── env.dev                        # shared settings, sourced by each docker-shell.sh (GCP_PROJECT, bucket, key path)
-├── .gitignore                     # ignores *.csv, *.json, dataset-creator/data/*, .DS_Store, .idea
+├── .gitignore                     # ignores *.csv, *.json, *.log, dataset-creator/data/* (listed twice), .DS_Store, .idea, for_local_exp
 ├── dataset-creator/               # container 1: make + upload the Q&A dataset
 │   ├── cli.py                     #   --generate (Gemini, JSON schema) / --prepare (csv+jsonl, split) / --upload (GCS)
 │   ├── Dockerfile                 #   python:3.12-slim-bookworm + uv sync --frozen into /.venv, user app (identical to llm-rag's)
@@ -908,7 +1186,7 @@ chat_client = genai.Client(
         epoch_count=1,
         learning_rate_multiplier=1.0,
         adapter_size="ADAPTER_SIZE_FOUR",
-        tuned_model_display_name="pavlos-cheese-demo-v3.1",
+        tuned_model_display_name="‹instructor›-cheese-demo-v3.1",
         validation_dataset=validation_dataset,
     )
 
@@ -932,9 +1210,9 @@ chat_client = genai.Client(
     # Get the model endpoint from Vertex AI Tuning UI after the job succeeds.
     # For gemini-3.1-flash-lite serving, use locations/us/endpoints/...
     # https://console.cloud.google.com/vertex-ai/studio/tuning?project=ac215-project
-    MODEL_ENDPOINT = "projects/129349313346/locations/us/endpoints/7655908260297310208"
+    MODEL_ENDPOINT = "projects/‹instructor-project-number›/locations/us/endpoints/‹endpoint-id›"
 
-    query = "How is cheese made in Greece? Answer pavlos style?"
+    query = "How is cheese made in Greece? Answer ‹instructor› style?"
     print("query: ", query)
     print("Using serving location:", SERVING_LOCATION)
 
@@ -946,7 +1224,7 @@ chat_client = genai.Client(
     generated_text = response.text
     print("Fine-tuned LLM Response:", generated_text)
 ```
-- **L107:** a full resource name that includes the **instructor's project number**. Because it starts with `projects/`, the client doesn't prepend *your* project (`_api_client.py:1008-1014`). Leave it unchanged and you're calling someone else's endpoint.
+- **L107:** a full resource name that includes the **instructor's project number** (masked here; your clone shows the real one). Because it starts with `projects/`, the client doesn't prepend *your* project (`_api_client.py:1008-1014`). Leave it unchanged and you're calling someone else's endpoint.
 - **L109:** no system prompt. The persona must come from the weights. Compare L10's app, which *adds* a RAG system instruction on top (`cheese-app-v0/api-service/api/routers/rag.py:110-120`).
 - **L113-117:** the same `generate_content` API as the base model; a tuned endpoint is a drop-in model name.
 
@@ -1033,54 +1311,75 @@ print_trainable_parameters(trainer.model)
 ## 6. Gotchas and common errors
 
 1. **`docker-shell.sh: 8: source: not found` (Ubuntu, Debian, WSL).**
-   - **Cause:** the README says `sh docker-shell.sh` (`README.md:87`, `:240`). On those systems `/bin/sh` is `dash`, which has no `source` builtin, and `set -e` then stops the script. The exact message was reproduced with a stand-in script.
+   - **Cause:** the README says `sh docker-shell.sh` (`README.md:87`, `:240`). On those systems `/bin/sh` is `dash`, which has no `source` builtin, and `set -e` then stops the script before `docker build`. Captured by running the script with dash (`laptop/20`):
+     ```
+     $ dash docker-shell.sh
+     docker-shell.sh: 8: source: not found
+     ```
+     (exit status 127).
    - **Line numbers:** line 8 in `dataset-creator/docker-shell.sh`, line 7 in `gemini-finetuner/docker-shell.sh`.
-   - **Fix:** `bash docker-shell.sh`, or change the line to `. ../env.dev`. macOS's `/bin/sh` is bash, so the README works there.
+   - **Fix:** `bash docker-shell.sh`, or change the line to `. ../env.dev`. macOS's `/bin/sh` is bash, and the capture laptop's BusyBox `sh` also accepts `source`, so the README command works there (`laptop/07`).
 
-2. **`../env.dev: No such file or directory`.**
-   - **Cause:** running the script from the repo root (`bash dataset-creator/docker-shell.sh`). Paths are relative to the current directory (`README.md:68`), so `source ../env.dev` looks one level *above* the repo and fails, and `set -e` stops the script there. (Even if it found an `env.dev`, `BASE_DIR=$(pwd)` (`env.dev:4`) would mount the wrong folder as `/app` and `docker build … .` would use the wrong context.)
+2. **`can't open '../env.dev'` / `../env.dev: No such file or directory`.**
+   - **Cause:** running the script from the repo root. Paths are relative to the current directory (`README.md:68`), so `source ../env.dev` looks one level *above* the repo and fails, and `set -e` stops the script there. Captured with BusyBox `sh` (`laptop/21`, exit 2):
+     ```
+     $ sh dataset-creator/docker-shell.sh
+     dataset-creator/docker-shell.sh: source: line 8: can't open '../env.dev': No such file or directory
+     ```
+     bash words it `line 8: ../env.dev: No such file or directory`. (Even if it found an `env.dev`, `BASE_DIR=$(pwd)` (`env.dev:4`) would mount the wrong folder as `/app` and `docker build … .` would use the wrong context.)
    - **Fix:** `cd dataset-creator` first.
 
-3. **Key not found.**
-   - **Symptoms:** `--generate` prints `Error occurred while generating content: File /secrets/llm-service-account.json was not found.` five times. `--prepare` then prints `Shape: (0, 0)` and crashes with `KeyError: 'question'`.
-   - **Cause:** the key isn't at `<parent>/secrets/llm-service-account.json`, or it's named `…json.json` (`README.md:67`). Docker silently mounts an empty, auto-created folder (`README.md:64`). The errors are swallowed by `cli.py:200-201`.
-   - **Fix:** `ls -la /secrets` inside the container (`README.md:69`).
+3. **Key not found: `--generate` "succeeds", `--prepare` crashes.**
+   - **Symptoms** (captured, `dataset-creator/05`, `07`): `--generate` prints `Error occurred while generating content: File /secrets/llm-service-account.json was not found.` five times and **exits 0**. `--prepare` then prints `Number of errors: 0`, `[]`, `Shape: (0, 0)` and crashes with `KeyError: 'question'` at `cli.py:243`, after writing a 1-byte `instruct-dataset.csv`.
+   - **Cause:** the key isn't at `<parent>/secrets/llm-service-account.json`, or it's named `…json.json` (`README.md:67`). Docker mounts the folder anyway, empty, or creates an empty one if it doesn't exist (`README.md:64`). The genai client only loads the key on its first request, and the per-batch `except` at `cli.py:200-201` swallows every error.
+   - **Fix:** `ls -la /secrets` inside the container (`README.md:69`); the captured empty listing (`total 0`, only `.` and `..`) is what a missing key looks like.
 
 4. **403 on upload or tuning.**
-   - **Upload:** `env.dev:7` still says `cheese-dataset`, a bucket in the instructor's project.
-   - **Tuning:** `gemini-finetuner/cli.py:10-11` still points at `gs://cheese-dataset/...`. The tuning job reads the data as your project's Vertex AI tuning service agent (`types.py:10224-10227`), which normally has no access to the course bucket, whatever roles your own SA has. (Not verified; if the course bucket were public, there would be no 403 and the job would train on the instructor's data.)
+   - **Upload:** `env.dev:7` still says `cheese-dataset`, a bucket in the course's project.
+   - **Tuning:** `gemini-finetuner/cli.py:10-11` still points at `gs://cheese-dataset/...` (captured with `grep -n 'gs://' cli.py`, `gemini-finetuner/04`). The tuning job reads the data as your project's Vertex AI tuning service agent (`types.py:10224-10227`), which normally has no access to the course bucket, whatever roles your own SA has. (Not verified; if the course bucket were public, there would be no 403 and the job would train on the instructor's data.)
    - Also: the SA lacks Storage Admin or `roles/aiplatform.user` (`README.md:43-44`), or `aiplatform.googleapis.com` isn't enabled.
    - **Fix:** use your own bucket in both places; grant the roles; enable the API (§2).
 
-5. **`--chat` returns 403/404 for `projects/129349313346/...`.**
+5. **`--chat` returns 403/404 for `projects/‹instructor-project-number›/...`.**
    - **Cause:** `MODEL_ENDPOINT` is hard-coded to the instructor's endpoint (`gemini-finetuner/cli.py:107`). L10's `cheese-app-v0/api-service/api/routers/rag.py:22` has the same trap.
-   - **Fix:** paste your endpoint from the console after the job succeeds (Step 11).
+   - **Fix:** paste your endpoint from the console after the job succeeds (§4 Step 11).
 
 6. **`PermissionError: [Errno 13] Permission denied: 'data'` (Linux hosts).**
-   - **Cause:** the container runs as uid 1000 (`Dockerfile:31`, `:38`) and writes into your bind-mounted folder (`docker-shell.sh:17`). `dataset-creator/data/.gitkeep` was deleted in `6e4c3f7`, so a fresh clone has no `data/` and the container must create it. If your host uid isn't 1000 and the folder isn't group/world-writable, that fails. Docker Desktop (macOS/Windows) maps permissions and isn't affected. *(Reasoned from the files; not reproduced.)*
+   - **Cause:** the container runs as uid 1000 (`Dockerfile:31`, `:38`) and writes into your bind-mounted folder (`docker-shell.sh:17`). `dataset-creator/data/.gitkeep` was deleted in `6e4c3f7`, so a fresh clone has no `data/` (captured, `laptop/03`) and the container must create it. If your host uid isn't 1000 and the folder isn't group/world-writable, that fails. Docker Desktop (macOS/Windows) maps permissions and isn't affected. *(Reasoned from the files; not reproduced: the capture laptop's user was uid 1000, like the container's `app`, so `data/` was created without trouble.)*
    - **Fix:** `mkdir -m 777 dataset-creator/data` on the host, or `chmod o+w dataset-creator`.
 
 7. **"My tuned model is `None`".**
-   - **Cause:** `main()` hard-codes `train(wait_for_job=False)` (`gemini-finetuner/cli.py:126`). After 60 s, `tuning_job.tuned_model` is still empty, so `Tuned model info: None` prints and the "paste that endpoint" hint (`:93-96`) never does.
+   - **Cause:** `main()` hard-codes `train(wait_for_job=False)` (`gemini-finetuner/cli.py:126`). After 60 s, `tuning_job.tuned_model` is still empty, so `Tuned model info: None` prints and the "paste that endpoint" hint (`:90-96`) never does.
    - **Fix:** watch the console (`README.md:261`), or set `wait_for_job=True`.
 
 8. **The README's system prompt and outputs don't match what you get.**
-   - **Cause:** the README excerpt (`README.md:114-135`) and the samples (`:163-175`, `:295-301`) predate commit `6e4c3f7`, which changed the openers in `dataset-creator/cli.py:83-101` and the chat query in `gemini-finetuner/cli.py:109`.
-   - **Fix:** trust the code, but expect a mix: the old openers are gone from the opener list, yet the prompt's sample JSON still uses them (`dataset-creator/cli.py:133`, `:137`, `:140`). Also expect the Colab's 16k dataset to use the *old* openers, e.g. "Yello - this is Pavlos your cheese monker" and "Welcome students, this is Pavlos…" (nb cell 55 output) or "Welcome welcome, cheese lovers! This is your lecturer Pavlos Protopapas…" (nb cell 63 output). None of the stored samples use the new "Good question"/"Glad you ask" openers. ("Remember rule number 672…" appears in both the old and the new prompt.)
+   - **Cause:** the README excerpt (`README.md:114-135`) and the samples (`:163-175`, `:295-301`) predate commit `6e4c3f7`, which changed the openers in `dataset-creator/cli.py:83-101` and the chat query in `gemini-finetuner/cli.py:109` (captured: `query:  How is cheese made in Greece? Answer ‹instructor› style?`, `gemini-finetuner/03`).
+   - **Fix:** trust the code, but expect a mix: the old openers are gone from the opener list, yet the prompt's sample JSON still uses them (`dataset-creator/cli.py:133`, `:137`, `:140`). Also expect the Colab's 16k dataset to use the *old* openers, e.g. "Yello - this is ‹instructor› your cheese monker" and "Welcome students, this is ‹instructor›…" (nb cell 55 output) or "Welcome welcome, cheese lovers! This is your lecturer ‹instructor› here…" (nb cell 63 output). None of the stored samples use the new "Good question"/"Glad you ask" openers. ("Remember rule number 672…" appears in both the old and the new prompt.)
 
 9. **Slow first build and a big image.**
-   - **Cause:** `pyproject.toml:8-16` is llm-rag's dependency list (`chromadb`, `langchain`, `langchain-community`, `openai`, `openai-agents`) plus `google-cloud-storage` and `scikit-learn`. The code imports only pandas, sklearn, google-cloud-storage and google-genai (`dataset-creator/cli.py:1-14`; `gemini-finetuner/cli.py:1-6`). Two images also get built.
+   - **Cause:** `pyproject.toml:8-16` is llm-rag's dependency list (`chromadb`, `langchain`, `langchain-community`, `openai`, `openai-agents`) plus `google-cloud-storage` and `scikit-learn`. The code imports only pandas, sklearn, google-cloud-storage and google-genai (`dataset-creator/cli.py:1-14`; `gemini-finetuner/cli.py:1-6`). Captured: 133 packages, `/.venv` 587 MB, image 1.64 GB each (`dataset-creator/02`, `laptop/09`, `laptop/19`). The second image reuses every layer up to `uv sync` and builds in 0.0 s (`laptop/18`).
    - **Fix (optional):** trim the dependencies with `uv remove chromadb langchain langchain-community openai openai-agents`, then rebuild.
-   - **Apple Silicon is fine:** every locked package with platform wheels also ships a Linux aarch64 wheel; a parse of `uv.lock` confirms it. The only exception is Windows-only `pywin32`. (`pypika` ships only an sdist, which uv builds at install time; it's pure Python, so it works on both architectures.)
+   - **Apple Silicon is fine:** every locked package with platform wheels also ships a Linux aarch64 wheel; a parse of `uv.lock` confirms it. The only exception is Windows-only `pywin32`. (`pypika` ships only an sdist, which uv builds at install time; it's pure Python, so it works on both architectures.) No aarch64 build was captured.
 
 10. **Truncated generations (`Number of errors: 1`).**
-    - **Cause:** 20 long answers must fit in `max_output_tokens=8192` (`dataset-creator/cli.py:176`). The README's own screenshot shows a mean of 267 output tokens per answer (`images/training-2.png`), so 20 answers come to ~5.5k+ tokens and usually fit. A verbose batch can hit the limit and produce invalid JSON, which `prepare()` skips (`:221-226`).
+    - **Cause:** 20 long answers must fit in `max_output_tokens=8192` (`dataset-creator/cli.py:176`). The README's own screenshot shows a mean of 267 output tokens per answer (`images/training-2.png`), so 20 answers come to ~5.5k+ tokens and usually fit. A verbose batch can hit the limit and produce invalid JSON, which `prepare()` skips (`:221-226`), with an `Unterminated string…` entry in the error list (Exercise B1 reproduces it on scripted data).
     - **Fix:** ask for 10 pairs per call, or raise the limit.
 
-11. **Container name conflict.**
-    - **Symptom:** `docker: Error response from daemon: Conflict. The container name "/llm-dataset-creator" is already in use`.
+11. **Container name conflict, and a second shell without the venv.**
+    - **Symptom** (captured, `laptop/11`, exit 125; the build itself is all `CACHED`):
+      ```
+      docker: Error response from daemon: Conflict. The container name "/llm-dataset-creator" is already in use by container "6f5113cdb660c20a…". You have to remove (or rename) that container to be able to reuse that name.
+      ```
     - **Cause:** a second terminal running the same script (`--name $IMAGE_NAME`, `docker-shell.sh:16`).
-    - **Fix:** exit the other shell, or attach a second shell with `docker exec -it llm-dataset-creator bash`. That new shell does **not** run `docker-entrypoint.sh`, so the venv isn't activated (`/.venv/bin` isn't on `PATH`; the Dockerfile never sets it). Run `source /.venv/bin/activate` first, or `python cli.py` will fail with `ModuleNotFoundError`.
+    - **Fix:** exit the other shell, or attach a second shell with `docker exec -it llm-dataset-creator bash`. That new shell does **not** run `docker-entrypoint.sh`, so the venv isn't activated (the Dockerfile never puts `/.venv/bin` on `PATH`). Captured (`laptop/12`):
+      ```
+      $ docker exec llm-dataset-creator bash -c 'which python; python -c "import pandas"'
+      /usr/local/bin/python
+      Traceback (most recent call last):
+        File "<string>", line 1, in <module>
+      ModuleNotFoundError: No module named 'pandas'
+      ```
+      Run `source /.venv/bin/activate` first (or call `/.venv/bin/python`).
 
 12. **Colab: `SecretNotFoundError` / `NotebookAccessError` at `userdata.get('HF_TOKEN')`.**
     - **Cause:** the secret is missing, has the wrong name, or "Notebook access" is off (nb cell 9).
@@ -1099,7 +1398,7 @@ print_trainable_parameters(trainer.model)
 
 15. **Colab: re-running the trainer cell (nb cell 72) without reloading the model.**
     - **Symptom:** PEFT warns "You are trying to modify a model with PEFT for a second time. If you want to reload the model with a different config, make sure to call `.unload()` before." (`peft/mapping_func.py:71-75`, peft 0.20.0).
-    - **Cause:** `SFTTrainer` injected the LoRA layers into `base_model`'s modules in place (that's why nb cell 82 can use `base_model` as the fine-tuned model), so a second `SFTTrainer(model=base_model, peft_config=...)` calls `get_peft_model` again (`trl/trainer/sft_trainer.py:1134`; `base_model` itself is not a `PeftModel`, so TRL's own guard at `:1093-1098` doesn't fire) and PEFT finds LoRA layers already there. Typical when you change `r` or `lora_alpha` in nb cell 67 and re-run from there. *(Warning condition read from the source; the effect on the already-trained adapter was not reproduced.)*
+    - **Cause:** `SFTTrainer` injected the LoRA layers into `base_model`'s modules in place (that's why nb cell 82 can use `base_model` as the fine-tuned model), so a second `SFTTrainer(model=base_model, peft_config=...)` calls `get_peft_model` again (`trl/trainer/sft_trainer.py:1134`; `base_model` itself is not a `PeftModel`, so TRL's own guard at `:1093-1098` doesn't fire) and PEFT finds LoRA layers already there. Typical when you change `r` or `lora_alpha` in nb cell 67 and re-run from there. (Exercise C8 reproduces both warnings with PEFT 0.20.0 on Qwen3's shapes; the effect on the already-trained adapter was not reproduced.)
     - **Fix:** re-run nb cell 36 (reload and `prepare_model_for_kbit_training`) before nb cells 67-72. Note also that nb cell 86 rebinds `base_model` to a fresh FP16 model that gets merged, so re-running Step 5 cells after Step 6.2 compares different objects.
 
 16. **Colab: downloads repeat each session.**
@@ -1115,11 +1414,20 @@ print_trainable_parameters(trainer.model)
     - `gcp-push.py:7` opens `llm_training_config.yaml`
     - `gcp-pull.py:33-36` reads `csv_downloaded`/`yaml_downloaded`, which are only assigned inside the loop (`:23`, `:28`); if no `.csv` (or no `.yaml`) blob exists, that read raises `UnboundLocalError` (a `NameError` subclass). `gcp-pull.py:20` also downloads CSVs into `./data/`, which exists only because of `autotrain-runner/data/.gitkeep`
     - the bucket `autotrain_trainer` is hard-coded (`gcp-pull.py:39`, `gcp-push.py:34`)
-    - `environment_droplet.yml:260` pins `prefix: /home/karthik_rathod/anaconda3/envs/autotrain-env`
+    - `environment_droplet.yml:260` pins a personal conda prefix under a contributor's home folder
     - `docker-shell.sh:15` needs `--gpus all` (an NVIDIA GPU)
     - `Dockerfile:2` uses `continuumio/miniconda3:latest`
 
     Read it as history only.
+
+19. **`--upload`, `--train` and `--chat` fail loudly without a key; `--train` also warns.**
+    - **Symptom** (captured, `dataset-creator/14`, `gemini-finetuner/02`, `03`, each exit 1): a long traceback ending in `google.auth.exceptions.DefaultCredentialsError: File /secrets/llm-service-account.json was not found.` `--train` first prints `ExperimentalWarning: The SDK's tuning implementation is experimental, and may change in future versions.`
+    - **Cause:** unlike `--generate`, these functions have no catch-all. The key is loaded when `storage.Client()` is built (`dataset-creator/cli.py:279`) or when google-genai adds the `Authorization` header to the first request (`_api_client.py:1070` in the traceback). The warning comes from google-genai 1.39.1's tuning module and is harmless.
+    - **Fix:** the key (§6.3). The traceback is long; its last line is the one that matters.
+
+20. **`KeyError: 'GCP_PROJECT'`, even for `--help`, outside the container.**
+    - **Cause:** `GCP_PROJECT = os.environ["GCP_PROJECT"]` (`dataset-creator/cli.py:17`, `gemini-finetuner/cli.py:9`) runs when the module is loaded, before argparse sees `--help`. In the container, `docker-shell.sh` passes it in with `-e`; on the laptop, nothing sets it (Exercise C5).
+    - **Fix:** run the CLI in the container.
 
 ---
 
@@ -1169,68 +1477,82 @@ print_trainable_parameters(trainer.model)
 
 ## 8. Exercises
 
-**E1. Count before you train (conceptual + hands-on)**
-- In nb cell 67, predict `trainable params` for (a) `r=16`, and (b) `r=8, target_modules="all-linear"`. Then run nb cells 67-72 to check. Use the config from nb cell 42: hidden 1024, 16 heads × 128 = 2048 for q, 8 KV heads × 128 = 1024 for k/v, intermediate 3072, 28 layers.
-- *Worked answer:*
-  - (a) The count is linear in r: 2 × 1,146,880 = **2,293,760**.
-  - (b) For each linear layer, r × (d_in + d_out). That's q 8×3072, k 8×2048, v 8×2048, o 8×3072, gate 8×4096, up 8×4096, down 8×4096, for 8 × 22,528 = 180,224 per layer. × 28 = **5,046,272**, or about 1.3% of the stored parameters. PEFT's `all-linear` excludes the output head; it's also tied to the embedding here.
-  - Memory and time grow accordingly. For pure style transfer, the gain is usually small.
+The exercises, with full answers, are in [`exercises.md`](https://github.com/JunyiZhou-Conny/Explainer_Videos/blob/main/videos/ac215-l08-llm-finetuning/exercises.md) in the video folder. Their outputs come from the 2026-10-31 captures, or from checks run the same day in throwaway containers of the tutorial's base image with the exact package versions of `uv.lock` (and, for the LoRA counts, peft 0.20.0 with transformers 5.16.1 on a CPU); every command is listed in the video folder's `assets/exercise-checks/`. There was no key and no GPU: tasks marked *with your key* (billed) or *in Colab* (a GPU runtime) take their answers from the code, the README (**expected**) or the staff's saved A100 run (**recorded**). Data marked **scripted** is hand-written, never Gemini's output.
 
-**E2. "source: not found" (debugging)**
-- On Ubuntu, `sh docker-shell.sh` in `gemini-finetuner/` prints `docker-shell.sh: 7: source: not found` and nothing else happens. Why line 7, why "not found", and why didn't Docker run?
-- *Worked answer:*
-  - `/bin/sh` is `dash`, which lacks the bash-only `source` builtin. Line 7 is `source ../env.dev` (`gemini-finetuner/docker-shell.sh:7`); in `dataset-creator` it's line 8.
-  - `set -e` (`:4`) aborts on the failure (exit status 127) before `docker build`.
-  - Fix: `bash docker-shell.sh`, or use the POSIX `. ../env.dev`.
+Do them after watching, without re-watching first, then re-watch only the chapter you got wrong. Before the hands-on part, park your real data on the laptop: in `~/AC215/llm-finetuning/dataset-creator`, `mv data data.mine` (and back afterwards), because `--prepare` always reads `data/cheese_qa_*.txt` and overwrites its five outputs. Save scratch scripts in `dataset-creator` (it is `/app` in the container), and never name one after a standard-library module (C10).
 
-**E3. The silent failure chain (debugging)**
-- `python cli.py --generate` prints five lines of `Error occurred while generating content: File /secrets/llm-service-account.json was not found.` and exits normally. `python cli.py --prepare` then prints `Shape: (0, 0)` and dies with `KeyError: 'question'`. Explain each step and the fix.
-- *Worked answer:*
-  - The genai client only loads ADC on the first request. google-auth reads `GOOGLE_APPLICATION_CREDENTIALS=/secrets/llm-service-account.json` and raises "File … was not found." (`google/auth/_default.py:174`, google-auth 2.41.1).
-  - `generate()` catches and prints it per batch (`cli.py:200-201`), so no `cheese_qa_*.txt` is written.
-  - `prepare()` builds an empty DataFrame. `drop_duplicates` on an empty frame is a no-op, so `Shape: (0, 0)` prints; then `output_pairs_df["question"]` at `:243` raises `KeyError`. This was reproduced with pandas.
-  - Fix: the key belongs in `<parent>/secrets/` with the exact name; check `ls -la /secrets` in the container.
-  - Lesson: an `except Exception: print(...)` turns hard errors into soft ones.
+### Test yourself: the five questions from the end of the video
 
-**E4. Grow the dataset (hands-on, predict-then-run)**
-- Set `NUM_ITERATIONS = 10` (`dataset-creator/cli.py:170`) and run `--generate --prepare`. Predict the number of files, the rows, the split sizes and the number of lines in `train.jsonl`. What happens to the files from the previous 5-iteration run?
-- *Worked answer:*
-  - 10 files, `cheese_qa_0..9.txt`. Files 0-4 are **overwritten** (`:196`), not appended.
-  - About 200 rows before deduplication, likely somewhat fewer after `drop_duplicates(subset=["question"])` (`:233`).
-  - `train_test_split(test_size=0.1)` gives ceil(0.1·N) test rows, e.g. 20 test and 180 train for N=200.
-  - `train.jsonl` has one line per training row.
-  - No edit is needed in `gemini-finetuner`, since the GCS object names stay the same after `--upload`. At the README's (stale) rate, tuning cost doubles with the token count.
+**Q1. What did this fine-tune change, and what didn't it? Use the sky.**
+<details><summary>Answer</summary>
 
-**E5. Wait for the job (hands-on)**
-- Change `gemini-finetuner/cli.py:126` to `train(wait_for_job=True)` and also print `tuning_job.state` and the elapsed minutes inside the loop. Predict what the loop prints and when it ends. Is there a state that would make it loop forever?
-- *Worked answer:*
-  - It prints `Job in progress... State: JobState.JOB_STATE_RUNNING` (str-enum members print with the class name) every 60 s until the state is one of `JOB_STATE_SUCCEEDED`, `JOB_STATE_FAILED` or `JOB_STATE_CANCELLED` (`:78-82`). The comparison works because `JobState` is a `str` enum (`_common.py:482`). On success, `:90-96` prints the model and endpoint and the "paste into MODEL_ENDPOINT" hint.
-  - `JOB_STATE_PAUSED` (`types.py:397`) and `JOB_STATE_EXPIRED` (`:399`) aren't in the set, so the loop would spin forever. More robust: the SDK's `tuning_job.has_ended` property (`types.py:10233-10236`), which also counts `JOB_STATE_EXPIRED` (`:6453-6458`), plus a timeout for the paused case.
+In the recorded side-by-side (nb cell 82), the base model blames **refraction** for the blue sky; the fine-tuned model opens in the persona's voice ("Yello - this is ‹instructor› your cheese monker…") and blames **water molecules**. Both are wrong (it's Rayleigh scattering by air molecules). Changed: the style; on the 100 test examples the loss fell from 2.6498 to 1.3872 and the perplexity from 14.15 to 4.00. Not changed: the facts, and the frozen base weights W₀ (inside `disable_adapter()` the original 4-bit model is back). Fine-tuning moves the default voice; for facts, use retrieval (L05) and check them.
+</details>
 
-**E6. Whose endpoint? (debugging + conceptual)**
-- `python cli.py --chat` returns `403 PERMISSION_DENIED`. Your `GCP_PROJECT` is correct and your SA has `roles/aiplatform.user`. What's wrong, and why doesn't `project=GCP_PROJECT` in the client fix it?
-- *Worked answer:*
-  - `MODEL_ENDPOINT` (`cli.py:107`) is the instructor's resource `projects/129349313346/…`.
-  - For model names starting with `projects/`, google-genai uses the path as-is (`_transformers.py:173-177`) and skips prefixing your project (`_api_client.py:1008-1014`). The request goes to the instructor's project, where your SA has no rights.
-  - Paste your own endpoint (`projects/<your-number>/locations/us/endpoints/<id>`) from the console.
+**Q2. Why did `python cli.py --generate` exit with status 0 without a key, and where did the error finally show up?**
+<details><summary>Answer</summary>
 
-**E7. Two baselines (conceptual, Colab)**
-- In 5.1 (nb cell 80) the "Base" is `trainer.model` inside `disable_adapter()`; in 5.2 (nb cell 82) the "Base Model" is `base_model_comparison`. Are they the same model? Would you expect the 5.1 base perplexity (14.15) to change if computed on the 5.2 base?
-- *Worked answer:*
-  - No. The 5.1 base is Qwen3-0.6B **4-bit NF4** with LoRA switched off; the 5.2 base is the **FP16, unquantized** model (`quantization_config` commented out at nb cell 82:57).
-  - Quantization adds small errors, so the FP16 base would probably score slightly lower (better) perplexity than 14.15 on the same text. The gap to the fine-tuned 4.00 would remain large, because the style shift dominates.
-  - For a clean ablation, compare like with like.
+The client loads credentials only on its first request; each batch raises "File /secrets/llm-service-account.json was not found.", and the `except Exception` at `dataset-creator/cli.py:200-201` prints it and moves on, so the program ends normally (`dataset-creator/05`). No `cheese_qa_*.txt` is written. The error surfaces one command later: `--prepare` prints `Shape: (0, 0)`, writes a 1-byte `instruct-dataset.csv` and crashes at `cli.py:243` with `KeyError: 'question'` (`dataset-creator/07`). Read the lines, not the exit code; fix the key and check with `ls -la /secrets`.
+</details>
 
-**E8. Make the trainer read your bucket (hands-on refactor)**
-- Change `gemini-finetuner/cli.py:10-11` so the dataset URIs come from the `GCS_BUCKET_NAME` env var that `docker-shell.sh:20` already passes in. What fails if the env var is missing, and when?
-- *Worked answer:*
-  - ```python
-    GCS_BUCKET_NAME = os.environ["GCS_BUCKET_NAME"]
-    TRAIN_DATASET = f"gs://{GCS_BUCKET_NAME}/llm-finetune-dataset-small/train.jsonl"
-    VALIDATION_DATASET = f"gs://{GCS_BUCKET_NAME}/llm-finetune-dataset-small/test.jsonl"
-    ```
-  - Without the env var, `KeyError: 'GCS_BUCKET_NAME'` fires at **import**, even for `--help`, exactly like `GCP_PROJECT` today.
-  - This removes the hidden coupling between `env.dev:7` and hard-coded constants. You can't edit both and get them out of sync.
+**Q3. Which shapes does one question–answer pair take on its way to Qwen's chat template?**
+<details><summary>Answer</summary>
+
+1. An object `{"question": …, "answer": …}` in Gemini's JSON reply, saved in `data/cheese_qa_N.txt`.
+2. A table row: `--prepare` drops duplicate questions and empty rows and saves `instruct-dataset.csv` (`question,answer`).
+3. A JSONL line in Gemini's tuning format, `{"contents":[{"role":"user",…},{"role":"model",…}]}` (`dataset-creator/11`, `12`), uploaded to your bucket.
+4. In the Colab, the staff's `train_16k.jsonl` has the same `contents` format; nb cell 55 pulls `question` and `answer` back out.
+5. Chat-template text: `<|im_start|>user\n…<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n…<|im_end|>` (nb cell 63).
+6. Token IDs; with a plain `text` column, the loss covers every token, question and template included.
+</details>
+
+**Q4. Why does `python cli.py --train` print `Tuned model info: None`, and where do you get the endpoint?**
+<details><summary>Answer</summary>
+
+`main()` calls `train(wait_for_job=False)` (`gemini-finetuner/cli.py:126`). `tunings.tune(...)` only submits the job and returns; the script prints the job name, sleeps 60 s, fetches the job again and skips the polling loop. A minute in, the job has no tuned model yet, so `:89` prints `None` and the hint at `:90-96` never prints. The endpoint comes from the console (Agent Platform › Tuning) once the job succeeds: paste `projects/<your-number>/locations/us/endpoints/<id>` into `MODEL_ENDPOINT` (`:107`). *(Predicted from the code; without a key, `--train` stops at the missing key, `gemini-finetuner/02`.)*
+</details>
+
+**Q5. Where does 1,146,880 come from, and what does QLoRA keep in GPU memory in this notebook?**
+<details><summary>Answer</summary>
+
+LoRA adds r × (in + out) numbers per adapted matrix. With r = 8 and PEFT's Qwen3 default (`q_proj`, `v_proj`): q 8 × (1,024 + 2,048) = 24,576, v 8 × (1,024 + 1,024) = 16,384, so 40,960 per block × 28 blocks = **1,146,880**, exactly the recorded `trainable params: 1146880` (nb cell 72). In GPU memory: the frozen base's linear weights in NF4 (two per byte, per-block constants quantized again), the unquantized embeddings and norms in float32, the adapters with their gradients and paged 32-bit AdamW states in float32 (about 18 MB), and FP16 activations, most of them recomputed by gradient checkpointing. By the exercises' estimate, under 1 GB plus activations (not measured).
+</details>
+
+### Hands-on (predict, then run)
+
+All run offline and free in the `llm-dataset-creator` container unless marked.
+
+- **B1 · Two broken batches.** Add a batch wrapped in a Markdown fence and one that stops mid-answer; predict `Number of errors` and the shape. *(The fence is stripped; the cut-off file is skipped whole: `Number of errors: 1`, an `Unterminated string` error, `Shape: (21, 2)` on the 19 scripted rows.)*
+- **B2 · How big is the validation file?** Generate N scripted pairs with a small script and predict the line counts for N = 21, 100 and 2,600. *(⌈0.1 × N⌉ test rows; `test.jsonl` is capped at 256, `test.csv` is not: 2,340 / 256 / 260 for N = 2,600.)*
+- **B3 · Flag order.** `python cli.py --upload --prepare` without a key. *(`prepare()` runs first, whatever order you type; then `upload()` fails with `DefaultCredentialsError`, exit 1.)*
+- **B4 · Which rows survive?** A repeated question, a lower-case copy, a missing answer and a `null` answer. *(Only the lower-case copy survives: `drop_duplicates` is exact-match, `dropna` removes both incomplete rows.)*
+- **B5 · Count before you train** *(plain Python; then in Colab)*. `r=16`; `target_modules="all-linear"`; q/k/v/o at r = 8. *(2,293,760; 5,046,272; 2,293,760.)*
+- **B6 · Steps, perplexity and file size.** *(450 steps; 226 with batches of 8; e^2.6498 = 14.15 and e^1.3872 = 4.00; about 4.59 MB of float32 adapters.)*
+- **B7 · absmax by hand.** The lecture's ten numbers to int8, then with one outlier. *(`[19, 29, 46, 51, 70, 85, 98, 105, 115, 127]`, max error 0.0362; with 102 the others squeeze onto 2-11 and the error grows tenfold.)*
+- **B8 · Wait for the job** *(with your key; billed)*. `train(wait_for_job=True)`. *(It polls every 60 s; `JOB_STATE_PAUSED` or `JOB_STATE_EXPIRED` would loop forever; use `has_ended` and a timeout.)*
+- **B9 · Make the trainer read your bucket.** Build the URIs from `GCS_BUCKET_NAME`. *(Without the variable even `--help` fails with `KeyError: 'GCS_BUCKET_NAME'`; env.dev line 7 becomes the one place to change.)*
+
+### Debugging
+
+- **C1 · `docker-shell.sh: 7: source: not found`** on Ubuntu in `gemini-finetuner`. *(dash has no `source`; line 7 there, line 8 in dataset-creator; `set -e` stops before `docker build`. Use `bash`.)*
+- **C2 · `can't open '../env.dev'`** from the repo root. *(Paths are relative to your current folder; `cd dataset-creator` first.)*
+- **C3 · A second shell without pandas.** *(`docker exec` skips the entrypoint; `source /.venv/bin/activate`.)*
+- **C4 · "The container name is already in use".** *(Every run uses `--name $IMAGE_NAME`; exit the first, or `docker exec` into it.)*
+- **C5 · `KeyError: 'GCP_PROJECT'` on `--help`** outside the container. *(The variable is read at import; only the container gets it.)*
+- **C6 · `Expecting value: line 1 column 1 (char 0)`** after a run with a key. *(An empty reply: `cli.py:198` opened the file before `write(None)` failed, leaving a 0-byte batch; delete it and generate again.)*
+- **C7 · `--chat` is refused** although `--train` works. *(`MODEL_ENDPOINT` still names the instructor's project; a `projects/…` path is used as-is.)*
+- **C8 · A second LoRA in Colab.** *(SFTTrainer injected LoRA in place; reload in 1.3 before 4.1-4.3.)*
+- **C9 · torchao in Colab.** *(The `ImportError` comes in 6.2, at the merge; run the uninstall cell and restart.)*
+- **C10 · `cannot import name 'Number' from 'numbers'`.** *(A scratch `numbers.py` shadows the standard library; rename it.)*
+
+### Think
+
+- **D1 · Prompt, RAG or fine-tune?** Weekly prices, a persona, a JSON schema, a changing policy document. *(Retrieval or a tool; prompt or fine-tune; structured output; RAG.)*
+- **D2 · Track A or Track B?** Who holds the weights, what you pay for, what you can inspect, what you ship. *(An endpoint and little control vs a 4.6 MB adapter or a 1.2 GB merged model you serve yourself.)*
+- **D3 · Check the teacher.** How to vet 100 synthetic pairs before paying for tuning. *(Read samples, check errors and shape, find near-duplicates, spot-check specific numbers.)*
+- **D4 · Why merge into a fresh 16-bit model?** *(Added to NF4 weights, the small update would round away; keep the adapter separate for several personas or more training.)*
+- **D5 · Is 14.15 → 4.00 a fair win?** *(The loss counts every token and the two notebook baselines differ; compare like with like, score answer tokens and factual questions.)*
+- **D6 · Scale it up.** Full fine-tuning vs QLoRA for a 7 B model by the 12-bytes-per-parameter rule. *(About 84 GB vs about 3.5 GB for the NF4 base plus extras; estimates, not measurements.)*
 
 ---
 
@@ -1239,19 +1561,19 @@ print_trainable_parameters(trainer.model)
 **Errata (wrong, outdated, ambiguous or inconsistent)**
 
 1. **The README doesn't tell you to edit the code.**
-   - `gemini-finetuner/cli.py:10-11` (dataset URIs in the course's `cheese-dataset` bucket) and `:107` (the instructor's endpoint `projects/129349313346/…`) must be changed. The README only says "Change any of the default parameters if needed" (`README.md:259`).
+   - `gemini-finetuner/cli.py:10-11` (dataset URIs in the course's `cheese-dataset` bucket) and `:107` (the instructor's endpoint `projects/‹instructor-project-number›/…`) must be changed. The README only says "Change any of the default parameters if needed" (`README.md:259`).
    - `env.dev:6-7` also needs editing; only its inline comments say so.
 2. **Missing setup steps:** the README never says to enable the Vertex AI API or create a bucket (Prerequisites at `README.md:31-69` cover only Docker, the clone and the SA). `upload()` assumes the bucket exists (`dataset-creator/cli.py:280`).
 3. **`sh docker-shell.sh` fails on dash systems** (`README.md:87`, `:240` vs `docker-shell.sh:8`/`:7`). It should be `bash docker-shell.sh`, or the scripts should use `.`.
 4. **Stale system-prompt excerpt.** `README.md:116-133` shows openers ("Welcome welcome welcome, cheese lovers!…", "Let us do system3") that commit `6e4c3f7` removed from the opener list in `dataset-creator/cli.py:83-101`. The same commit left the prompt's sample JSON (`cli.py:129-142`) unchanged, so the prompt now contradicts itself: the list asks for "Good question"-style openers while the examples open with "Welcome welcome welcome…", "Yello…" and "Welcome welcome to AC215…".
-5. **Stale chat example.** `README.md:296` uses "How is cheese made?"; the code asks "How is cheese made in Greece? Answer pavlos style?" (`gemini-finetuner/cli.py:109`).
+5. **Stale chat example.** `README.md:296` uses "How is cheese made?"; the code asks "How is cheese made in Greece? Answer ‹instructor› style?" (`gemini-finetuner/cli.py:109`).
 6. **Stale cost section.**
    - `README.md:269` prices "Gemini 1.5 Flash Tuning" at $0.008/1k tokens, and the table (`:271-274`) assumes 3 epochs.
    - The code tunes `gemini-3.1-flash-lite` (`cli.py:15`) for 1 epoch (`:53`).
    - `README.md:151` ("$2.0 for 1000 iterations") also predates the current generator.
    - The screenshots (`images/*.png`, added 2024-09-29 in `d03f044`) come from a ~16k-example run of the old setup.
 7. **"Parameters" are constants, not flags.** `README.md:106` and `:259` say "Change any of the default parameters". There are no CLI options beyond the three/two flags; the values are module constants (`dataset-creator/cli.py:170`, `gemini-finetuner/cli.py:52-58`).
-8. **The CLI never waits.** `main()` hard-codes `wait_for_job=False` (`gemini-finetuner/cli.py:126`), so the polling loop and the endpoint hint (`:74-96`) are dead code in the documented flow.
+8. **The CLI never waits.** `main()` hard-codes `wait_for_job=False` (`gemini-finetuner/cli.py:126`), so the polling loop (`:74-87`) is dead code in the documented flow, and the endpoint hint (`:90-96`) is practically unreachable: it only prints if the job already has a tuned model 60 s after submission.
 9. **Type mismatch that happens to work.** A `TuningDataset` is passed as `validation_dataset` (`gemini-finetuner/cli.py:49`, `:57`), which is typed `TuningValidationDataset` (`google/genai/types.py:10541`). pydantic's `from_attributes=True` (`_common.py:437`) coerces it. `types.TuningValidationDataset(gcs_uri=...)` would be correct.
 10. **Mangled prompt instructions.**
     - `dataset-creator/cli.py:123` asks the model to escape apostrophes "with a backslash (\')". In a non-raw Python string, `\'` becomes `'`, so the model actually reads "(')".
@@ -1273,6 +1595,8 @@ print_trainable_parameters(trainer.model)
     - The 5.1 and 5.2 baselines are different models (§3.8, E7).
     - nb cell 2 says an HF token is "Required", but both models are public; it's needed only for the Step 6.3 upload.
 19. **Lecture numbering.** `tutorials_demo.md:112` calls this "Lecture 8", while `_modules/week-05.md:11-13` lists "LLM - Finetuning" on Oct 1 as "Lecture 7". Also, the L10 entry in `tutorials_demo.md:142` is headed "### LLM-Fine Tuning" although it describes Cheese-app-V0, a copy-paste leftover.
+20. **Errors that don't stop `--generate`.** The per-batch `except Exception` (`dataset-creator/cli.py:200-201`) turns a missing key into five printed lines and exit status 0 (captured, `dataset-creator/05`); the failure only surfaces in `--prepare` as `KeyError: 'question'`, after a 1-byte `instruct-dataset.csv` has been written (`dataset-creator/07`, `laptop/13`). The README never mentions it.
+21. **`sh docker-shell.sh` only works where `sh` accepts `source`** (macOS, BusyBox): on Debian/Ubuntu/WSL it stops at `docker-shell.sh: 8: source: not found` (captured with dash, `laptop/20`). Same as erratum 3, listed here because it is the README's own command in two places.
 
 **Open questions (could not be determined from the sources)**
 - Whether `gemini-3.1-flash-lite` is currently tunable in `us-central1` for a student project, how long a ~90-example, 1-epoch job takes, and its current price per training token. No job was run.
@@ -1283,12 +1607,13 @@ print_trainable_parameters(trainer.model)
   - With google-genai 1.39.1 (this repo's lock), the default would be `https://us-aiplatform.googleapis.com/` (`_api_client.py:654-656`), so for this lock the override is needed.
   - Newer SDKs do it themselves: google-genai 2.30.0 has `_MULTI_REGIONAL_LOCATIONS = {'us', 'eu'}` and builds `https://aiplatform.{location}.rep.googleapis.com/` for them (its `_api_client.py:99`, `:828-834`). That is why L10's `cheese-app-v0` (google-genai 2.28.0, `location="us"`, no override) can call the same kind of endpoint. 2.30.0 and 2.29.0 (the same logic at its `_api_client.py:809-815`) were checked, not 2.28.0 itself.
 - Which console URL is current. The README uses `https://console.cloud.google.com/agent-platform/tuning/managed` (`README.md:261`, `:308`); the code comment uses `…/vertex-ai/studio/tuning?project=ac215-project` (`gemini-finetuner/cli.py:106`).
-- What the Ed lesson and slides add. The notebook defers NF4 and double quantization details to the "lecture notes" (nb cell 28).
+- What the Ed lesson adds. (The lecture slides are digested in [Lecture slides](#lecture-slides); they cover NF4, which nb cell 28 defers to the "lecture notes", but skip double quantization.)
 - Provenance of the Drive file `train_16k.jsonl` (`1b5hFsjpCqI3ZXvraIF0w7eW-mRO7Ecao`). Its answers use the *old* openers (nb cell 55 output), and it matches the README's "16,444 documents" row (`README.md:273`), so it was probably produced by an earlier `dataset-creator`. Not confirmed.
 - Whether the hosted demo `https://ac215-llm-rag.dlops.io/finetunechat` (`README.md:303`) is still live.
-- Exact Docker image size and build time; no image was built.
+- How long the first build takes on a typical laptop. The capture's build took 45.1 s with a fast network and produced a 1.64 GB image (`laptop/07`, `laptop/09`); Apple Silicon was not captured.
+- What a successful `--generate`, `--upload` and `--train` print, and how long the tuning job runs and what it costs: no key was available, and nothing documents those outputs.
 
-_Verified against the repos on 2026-10-13 (adversarial check)._
+_Verified against the repos on 2026-10-13 (adversarial check) and re-verified on 2026-10-31; terminal outputs from the 2026-10-31 captures._
 
 ---
 
@@ -1297,8 +1622,9 @@ _Verified against the repos on 2026-10-13 (adversarial check)._
 - README sections (pinned commit): [Prerequisites](https://github.com/dlops-io/llm-finetuning/blob/44ef6f0a70315aa0a551b8565ca862679a87c1eb/README.md#prerequisites) ([Setup GCP Service Account](https://github.com/dlops-io/llm-finetuning/blob/44ef6f0a70315aa0a551b8565ca862679a87c1eb/README.md#setup-gcp-service-account)) · [Generate Question Answer Dataset](https://github.com/dlops-io/llm-finetuning/blob/44ef6f0a70315aa0a551b8565ca862679a87c1eb/README.md#generate-question-answer-dataset) ([Run Container](https://github.com/dlops-io/llm-finetuning/blob/44ef6f0a70315aa0a551b8565ca862679a87c1eb/README.md#run-container), [Generate Text](https://github.com/dlops-io/llm-finetuning/blob/44ef6f0a70315aa0a551b8565ca862679a87c1eb/README.md#generate-text), [Sample Question Answers](https://github.com/dlops-io/llm-finetuning/blob/44ef6f0a70315aa0a551b8565ca862679a87c1eb/README.md#sample-question-answers), [Prepare Dataset](https://github.com/dlops-io/llm-finetuning/blob/44ef6f0a70315aa0a551b8565ca862679a87c1eb/README.md#prepare-dataset), [Upload Dataset](https://github.com/dlops-io/llm-finetuning/blob/44ef6f0a70315aa0a551b8565ca862679a87c1eb/README.md#upload-dataset)) · [Fine-tune Gemini](https://github.com/dlops-io/llm-finetuning/blob/44ef6f0a70315aa0a551b8565ca862679a87c1eb/README.md#fine-tune-gemini) ([Run Container](https://github.com/dlops-io/llm-finetuning/blob/44ef6f0a70315aa0a551b8565ca862679a87c1eb/README.md#run-container-1), [Fine-tune Model](https://github.com/dlops-io/llm-finetuning/blob/44ef6f0a70315aa0a551b8565ca862679a87c1eb/README.md#fine-tune-model), [Cost of Fine-tuning](https://github.com/dlops-io/llm-finetuning/blob/44ef6f0a70315aa0a551b8565ca862679a87c1eb/README.md#cost-of-fine-tuning), [Chat with Fine-tuned Model](https://github.com/dlops-io/llm-finetuning/blob/44ef6f0a70315aa0a551b8565ca862679a87c1eb/README.md#chat-with-fine-tuned-model)) · latest README on [`main`](https://github.com/dlops-io/llm-finetuning#llm-fine-tuning) · last year's [`pipenv` branch](https://github.com/dlops-io/llm-finetuning/tree/pipenv)
 - Ed lesson: [L08 · LLM: Finetuning](https://edstem.org/us/courses/97373/lessons/166032/) · course [tutorials page](https://harvard-iacs.github.io/2026-AC215/tutorials_demo/)
 - Colab: [Tutorial - Finetuning with QLoRA](https://colab.research.google.com/drive/1oX3ADMHphW2v7mwV7zkEWD5oYewJZEAC)
-- Hosted demo (optional, Chrome; may not be live): [Pavlos Cheese Model](https://ac215-llm-rag.dlops.io/finetunechat) · Console: [Agent Platform Tuning](https://console.cloud.google.com/agent-platform/tuning/managed)
+- Hosted demo (optional, Chrome; may not be live): [fine-tuned cheese model](https://ac215-llm-rag.dlops.io/finetunechat) · Console: [Agent Platform Tuning](https://console.cloud.google.com/agent-platform/tuning/managed)
 - Context repos (pinned commits): [`llm-rag` @ `e17a39f`](https://github.com/dlops-io/llm-rag/tree/e17a39f35bc07b440f573def480adaf4703f8b91) · [`cheese-app-v0` @ `cb6fb94`](https://github.com/dlops-io/cheese-app-v0/tree/cb6fb94576aa37bb0b94a8745e5e94e6a504f4bb)
+- Video: [AC215 · L08 follow-along](https://github.com/JunyiZhou-Conny/Explainer_Videos/tree/main/videos/ac215-l08-llm-finetuning) · [exercises](https://github.com/JunyiZhou-Conny/Explainer_Videos/blob/main/videos/ac215-l08-llm-finetuning/exercises.md) · [captures and their provenance (`ASSETS.md`)](https://github.com/JunyiZhou-Conny/Explainer_Videos/blob/main/videos/ac215-l08-llm-finetuning/ASSETS.md) · [lecture slide digest (`SLIDES.md`)](https://github.com/JunyiZhou-Conny/Explainer_Videos/blob/main/videos/ac215-l08-llm-finetuning/SLIDES.md)
 - Previous lecture: [L07 · LLM: Agents II](L07-agents-2-harness.md)
 - Next lecture: [L09 · Automating Software Development: CI, unit testing](L09-ci-testing-precommit.md)
 - Referenced in §4 and §7: [L02 · Containers I](L02-containers-1.md) · [L05 · Introduction to RAG](L05-rag.md) · [L06 · LLM: Agents I](L06-agents-1.md) · [L10 · Connecting to the Cloud: Networking, Authentication & Storage](L10-cloud-connect-cheese-app-v0.md) (uses your tuned endpoint) · [L13 · Advanced Training Workflows: experiment tracking (W&B), multi-GPU, serverless training (Vertex AI)](L13-training-workflows.md) · [L14 · Serverless Deployment: Cloud Functions, Cloud Run](L14-serverless-deployment.md) · [L15 · ML Workflows with Vertex AI](L15-vertex-ml-workflows.md)
