@@ -98,7 +98,7 @@ lectures:
       - {name: "Cheese Newsletter · Harness (Colab)", colab: "https://colab.research.google.com/drive/1nnHrJ4Si3tpgUQl6HqlcwxKymV1-ecPv?usp=sharing"}
     guide: guides/L06-agents-1.md
     video: ac215-l06-agents-1
-    video_status: "🎬 31 min, 2 parts · final review"
+    video_status: "🎬 31 min, 2 parts · on Bilibili (BV14zxB6nETz)"
   - n: 7
     title: "LLM: Agents II"
     ed: https://edstem.org/us/courses/97373/lessons/166031/
@@ -107,6 +107,7 @@ lectures:
       - {name: "Agent Harness (Colab)", colab: "https://colab.research.google.com/drive/1ZYMsbG0gqsbs-6Pcj8WtT3WhEa4f80EZ?usp=sharing"}
     guide: guides/L07-agents-2-harness.md
     video: ac215-l07-agent-harness
+    video_status: "🎬 31 min, 2 parts · on Bilibili (BV1texB69EGC)"
   - n: 8
     title: "LLM: Finetuning"
     ed: https://edstem.org/us/courses/97373/lessons/166032/
