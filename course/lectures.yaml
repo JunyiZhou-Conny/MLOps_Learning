@@ -116,6 +116,7 @@ lectures:
       - {name: "LLM Fine Tuning (Colab)", colab: "https://colab.research.google.com/drive/1oX3ADMHphW2v7mwV7zkEWD5oYewJZEAC"}
     guide: guides/L08-llm-finetuning.md
     video: ac215-l08-llm-finetuning
+    video_status: "🎬 33 min, 2 parts · on Bilibili (BV1Zox46uEk8)"
   - n: 9
     title: "Automating Software Development: CI, unit testing"
     ed: https://edstem.org/us/courses/97373/lessons/166034/
