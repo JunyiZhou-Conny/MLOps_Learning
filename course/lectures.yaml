@@ -33,6 +33,8 @@ repos:
   serverless-deployment: {url: https://github.com/dlops-io/serverless-deployment, pinned: 46cc62f}
   model-deployment:      {url: https://github.com/dlops-io/model-deployment,      pinned: 3fbf63f}
   ml-workflow:           {url: https://github.com/dlops-io/ml-workflow,           pinned: 972ffbb}
+  model-deployment-aws:  {url: https://github.com/dlops-io/model-deployment-aws,  pinned: 077f4db}
+  ml-workflow-aws:       {url: https://github.com/dlops-io/ml-workflow-aws,       pinned: f165c6e}
   cheese-app-v1:         {url: https://github.com/dlops-io/cheese-app-v1,         pinned: ce03a10}
   cheese-app-v2:         {url: https://github.com/dlops-io/cheese-app-v2,         pinned: 14f2a14}
   cheese-app-v3:         {url: https://github.com/dlops-io/cheese-app-v3,         pinned: 3ecef56}
@@ -174,10 +176,13 @@ lectures:
     title: ML Workflows with Vertex AI
     ed: https://edstem.org/us/courses/97373/lessons/166040/
     tutorials:
-      - {name: "Model Deployment (Vertex AI)", repo: model-deployment}
-      - {name: "ML Workflow (Vertex AI Pipelines)", repo: ml-workflow}
+      - {name: "Model Deployment (SageMaker, the AWS tutorial the video follows)", repo: model-deployment-aws}
+      - {name: "ML Workflow (SageMaker Pipelines, AWS)", repo: ml-workflow-aws}
+      - {name: "Model Deployment (Vertex AI, the slides' version)", repo: model-deployment}
+      - {name: "ML Workflow (Vertex AI Pipelines, the slides' version)", repo: ml-workflow}
     guide: guides/L15-vertex-ml-workflows.md
     video: ac215-l15-vertex-ml-workflows
+    video_status: "🎬 30 min, 2 parts · on Bilibili (BV1cu4Y68ETq)"
   - n: 16
     title: "System Tradeoffs: Performance, Cost, and Design Choices"
     ed: https://edstem.org/us/courses/97373/lessons/166041/
