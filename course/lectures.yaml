@@ -30,7 +30,7 @@ repos:
   data-labeling:         {url: https://github.com/dlops-io/data-labeling,         pinned: 03c3e27}
   data-versioning:       {url: https://github.com/dlops-io/data-versioning,       pinned: b240b1a}
   model-training:        {url: https://github.com/dlops-io/model-training,        pinned: b9aee1c}
-  serverless-deployment: {url: https://github.com/dlops-io/serverless-deployment, pinned: 4eaf343}
+  serverless-deployment: {url: https://github.com/dlops-io/serverless-deployment, pinned: 46cc62f}
   model-deployment:      {url: https://github.com/dlops-io/model-deployment,      pinned: 3fbf63f}
   ml-workflow:           {url: https://github.com/dlops-io/ml-workflow,           pinned: 972ffbb}
   cheese-app-v1:         {url: https://github.com/dlops-io/cheese-app-v1,         pinned: ce03a10}
@@ -127,6 +127,7 @@ lectures:
       - {name: "Guest lecture (Rahul Dave) · project", repo: babykev}
     guide: guides/L09-ci-testing-precommit.md
     video: ac215-l09-ci-testing
+    video_status: "🎬 30 min, 2 parts · on Bilibili (BV1z8xU6TE41)"
   - n: 10
     title: "Connecting to the Cloud: Networking, Authentication & Storage"
     ed: https://edstem.org/us/courses/97373/lessons/166035/
@@ -134,6 +135,7 @@ lectures:
       - {name: "Cheese App v0", repo: cheese-app-v0}
     guide: guides/L10-cloud-connect-cheese-app-v0.md
     video: ac215-l10-cloud-connect
+    video_status: "🎬 31 min, 2 parts · on Bilibili (BV1TjxD6REvQ)"
   - n: 11
     title: "Data Labeling, Versioning and Monitoring"
     ed: https://edstem.org/us/courses/97373/lessons/166036/
@@ -142,6 +144,7 @@ lectures:
       - {name: "Data Versioning (DVC)", repo: data-versioning}
     guide: guides/L11-data-labeling-versioning.md
     video: ac215-l11-data-labeling-versioning
+    video_status: "🎬 32 min, 2 parts · on Bilibili (BV1yXx96oEAL)"
   - n: 12
     title: App Design
     ed: https://edstem.org/us/courses/97373/lessons/166037/
@@ -155,14 +158,18 @@ lectures:
       - {name: "Serverless Model Training (Vertex AI)", repo: model-training}
     guide: guides/L13-training-workflows.md
     video: ac215-l13-training-workflows
+    video_status: "🎬 32 min, 2 parts · on Bilibili (BV1aRxR65EJa)"
   - n: 14
     title: "Serverless Deployment: Cloud Functions, Cloud Run"
     ed: https://edstem.org/us/courses/97373/lessons/166039/
     tutorials:
-      - {name: "Cloud Function", repo: serverless-deployment, section: "Running App as Cloud Function"}
-      - {name: "Cloud Run", repo: serverless-deployment, section: "Running App in Cloud Run"}
+      - {name: "Cloud Run function", repo: serverless-deployment, section: "Part 1: Deploy a translation function"}
+      - {name: "Cloud Run service", repo: serverless-deployment, section: "Part 2: Deploy a translation web app"}
+      - {name: "Runtime identity", repo: serverless-deployment, section: "Part 3: Give the web app access to Agent Platform"}
+      - {name: "Cloud Run job", repo: serverless-deployment, section: "Part 4: Generate and save a translated audio edition"}
     guide: guides/L14-serverless-deployment.md
     video: ac215-l14-serverless-deployment
+    video_status: "🎬 31 min, 2 parts · on Bilibili (BV1uz4t6eE45)"
   - n: 15
     title: ML Workflows with Vertex AI
     ed: https://edstem.org/us/courses/97373/lessons/166040/
