@@ -169,6 +169,7 @@ lectures:
       - {name: "Cloud Run job", repo: serverless-deployment, section: "Part 4: Generate and save a translated audio edition"}
     guide: guides/L14-serverless-deployment.md
     video: ac215-l14-serverless-deployment
+    video_status: "🎬 31 min, 2 parts · on Bilibili (BV1uz4t6eE45)"
   - n: 15
     title: ML Workflows with Vertex AI
     ed: https://edstem.org/us/courses/97373/lessons/166040/
