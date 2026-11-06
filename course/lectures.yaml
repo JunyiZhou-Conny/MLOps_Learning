@@ -201,6 +201,7 @@ lectures:
       - {name: "App v2 · React frontend", repo: cheese-app-v2, section: "Tutorial 25: React Frontend Setup"}
     guide: guides/L18-apis-frontend.md
     video: ac215-l18-apis-frontend
+    video_status: "🎬 32 min, 2 parts · on Bilibili (BV1U94V6oECP)"
   - n: 19
     title: "Scaling: Kubernetes (local)"
     ed: https://edstem.org/us/courses/97373/lessons/166044/
