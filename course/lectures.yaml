@@ -36,7 +36,7 @@ repos:
   model-deployment-aws:  {url: https://github.com/dlops-io/model-deployment-aws,  pinned: 077f4db}
   ml-workflow-aws:       {url: https://github.com/dlops-io/ml-workflow-aws,       pinned: f165c6e}
   cheese-app-v1:         {url: https://github.com/dlops-io/cheese-app-v1,         pinned: ce03a10}
-  cheese-app-v2:         {url: https://github.com/dlops-io/cheese-app-v2,         pinned: 14f2a14}
+  cheese-app-v2:         {url: https://github.com/dlops-io/cheese-app-v2,         pinned: 447b5c3}  # main, refactored 2026-11-05; the 2025 app is branch 2025 @ 14f2a14
   cheese-app-v3:         {url: https://github.com/dlops-io/cheese-app-v3,         pinned: 3ecef56}
   cheese-app-v4:         {url: https://github.com/dlops-io/cheese-app-v4,         pinned: 033f187}
   babykev-walk:          {url: https://github.com/rahuldave/babykev-walk,         pinned: 82adb14, note: "guest lecture (L9), Rahul Dave"}
@@ -197,10 +197,11 @@ lectures:
     tutorials:
       - {name: "App v1 · simple frontend with FastAPI", repo: cheese-app-v1}
       - {name: "App v2 · FastAPI backend", repo: cheese-app-v2, section: "Tutorial 23: Backend APIs"}
-      - {name: "App v2 · simple frontend", repo: cheese-app-v2, section: "Tutorial 24: Simple Frontend App"}
+      - {name: "App v2 · simple frontend (branch 2025)", repo: cheese-app-v2, branch: "2025", section: "Tutorial 24: Simple Frontend App"}
       - {name: "App v2 · React frontend", repo: cheese-app-v2, section: "Tutorial 25: React Frontend Setup"}
     guide: guides/L18-apis-frontend.md
     video: ac215-l18-apis-frontend
+    video_status: "🎬 32 min, 2 parts · on Bilibili (BV1U94V6oECP)"
   - n: 19
     title: "Scaling: Kubernetes (local)"
     ed: https://edstem.org/us/courses/97373/lessons/166044/
