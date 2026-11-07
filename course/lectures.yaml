@@ -215,6 +215,7 @@ lectures:
       - {name: "App v3 · deployment to GCP with Pulumi (single VM)", repo: cheese-app-v3, section: "Deployment to GCP (Single VM Instance)"}
     guide: guides/L20-deployment-pulumi.md
     video: ac215-l20-deployment-pulumi
+    video_status: "🎬 31 min, 2 parts · on Bilibili (BV1hs4H6SEMj)"
   - n: 21
     title: "Automating Software Development: CI/CD with GitHub Actions II"
     ed: https://edstem.org/us/courses/97373/lessons/166046/
