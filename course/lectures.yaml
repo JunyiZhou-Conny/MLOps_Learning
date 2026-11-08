@@ -231,6 +231,7 @@ lectures:
       - {name: "App v3 · deployment with scaling using Kubernetes", repo: cheese-app-v3, section: "Deployment with Scaling using Kubernetes"}
     guide: guides/L22-kubernetes-cloud.md
     video: ac215-l22-kubernetes-cloud
+    video_status: "🎬 30 min, 2 parts · on Bilibili (BV1DxWH6MEFL)"
   - n: 23
     title: Final Deployment and Review
     ed: https://edstem.org/us/courses/97373/lessons/166048/
@@ -238,3 +239,4 @@ lectures:
       - {name: "App v4 · CI/CD automation", repo: cheese-app-v4, section: "Cheese App - Automation"}
     guide: guides/L23-final-cicd-deployment.md
     video: ac215-l23-final-cicd
+    video_status: "🎬 30 min, 2 parts · on Bilibili (BV1n6WH6ZEf3)"
