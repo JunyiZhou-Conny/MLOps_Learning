@@ -223,6 +223,7 @@ lectures:
       - {name: "GitHub Actions remote CI", repo: cheese-app-ci-cd, section: "Part 5: GitHub Actions Remote CI"}
     guide: guides/L21-cicd-github-actions.md
     video: ac215-l21-cicd-github-actions
+    video_status: "🎬 29 min, 2 parts · on Bilibili (BV1Vp4W6fEEM)"
   - n: 22
     title: "Scaling: Kubernetes (cloud)"
     ed: https://edstem.org/us/courses/97373/lessons/166047/
